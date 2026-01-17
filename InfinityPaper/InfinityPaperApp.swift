@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct InfinityPaperApp: App {
+    @StateObject private var proStatus = ProStatus()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(proStatus)
+                .task {
+                    await proStatus.restorePurchases()
+                }
         }
     }
 }
