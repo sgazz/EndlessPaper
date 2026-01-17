@@ -10,28 +10,49 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var proStatus: ProStatus
+    @State private var menuTrigger: Int = 0
 
     var body: some View {
-        TapeCanvasView(
-            isProUser: proStatus.isPro,
-            scenePhase: scenePhase,
-            purchasePro: {
-                await proStatus.purchasePro()
-            }
-        )
+        ZStack {
+            TapeCanvasView(
+                isProUser: proStatus.isPro,
+                scenePhase: scenePhase,
+                menuTrigger: menuTrigger,
+                purchasePro: {
+                    await proStatus.purchasePro()
+                }
+            )
             .ignoresSafeArea()
+
+            Circle()
+                .fill(Color.orange.opacity(0.95))
+                .frame(width: 22, height: 22)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, 12)
+                .padding(.leading, 12)
+                .zIndex(10)
+                .highPriorityGesture(
+                    TapGesture().onEnded {
+                        menuTrigger += 1
+                    }
+                )
+        }
     }
 }
 
 private struct TapeCanvasView: View {
     let isProUser: Bool
     let scenePhase: ScenePhase
+    let menuTrigger: Int
     let purchasePro: () async -> Bool
 
     var body: some View {
         TapeCanvasRepresentable(
             isProUser: isProUser,
             scenePhase: scenePhase,
+            menuTrigger: menuTrigger,
             purchasePro: purchasePro
         )
             .ignoresSafeArea()
@@ -41,10 +62,11 @@ private struct TapeCanvasView: View {
 private struct TapeCanvasRepresentable: UIViewRepresentable {
     let isProUser: Bool
     let scenePhase: ScenePhase
+    let menuTrigger: Int
     let purchasePro: () async -> Bool
 
     final class Coordinator {
-        weak var view: TapeCanvasUIView?
+        var lastMenuTrigger: Int = 0
     }
 
     func makeUIView(context: Context) -> TapeCanvasUIView {
@@ -52,7 +74,6 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
         view.backgroundColor = UIColor(white: 0.98, alpha: 1.0)
         view.isProUser = isProUser
         view.onPurchasePro = purchasePro
-        context.coordinator.view = view
         return view
     }
 
@@ -61,6 +82,10 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
         uiView.onPurchasePro = purchasePro
         if scenePhase == .background {
             uiView.persistSessionIfNeeded()
+        }
+        if context.coordinator.lastMenuTrigger != menuTrigger {
+            context.coordinator.lastMenuTrigger = menuTrigger
+            uiView.showMenuAtCenter()
         }
     }
 
@@ -166,12 +191,6 @@ private final class TapeCanvasUIView: UIView {
         recognizer.maximumNumberOfTouches = 2
         return recognizer
     }()
-    private lazy var menuTriggerRecognizer: UITapGestureRecognizer = {
-        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleMenuTrigger(_:)))
-        recognizer.numberOfTouchesRequired = 3
-        recognizer.cancelsTouchesInView = false
-        return recognizer
-    }()
     private lazy var tapRecognizer: UITapGestureRecognizer = {
         let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         recognizer.cancelsTouchesInView = false
@@ -182,7 +201,6 @@ private final class TapeCanvasUIView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
-        addGestureRecognizer(menuTriggerRecognizer)
         addGestureRecognizer(tapRecognizer)
         configureMenu()
         registerForAppLifecycle()
@@ -192,7 +210,6 @@ private final class TapeCanvasUIView: UIView {
         super.init(coder: coder)
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
-        addGestureRecognizer(menuTriggerRecognizer)
         addGestureRecognizer(tapRecognizer)
         configureMenu()
         registerForAppLifecycle()
@@ -635,9 +652,10 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
-    @objc private func handleMenuTrigger(_ recognizer: UITapGestureRecognizer) {
-        guard recognizer.state == .ended else { return }
-        menuCenter = recognizer.location(in: self)
+
+    func showMenuAtCenter() {
+        menuCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        colorMenuView.isHidden = true
         menuView.isHidden = false
         bringSubviewToFront(menuView)
         setNeedsLayout()
