@@ -162,7 +162,11 @@ private final class TapeCanvasUIView: UIView {
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
     private let menuView = UIView()
+    private let menuBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let menuTintOverlay = UIView()
     private let colorMenuView = UIView()
+    private let colorMenuBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let colorMenuTintOverlay = UIView()
     private let colorButton = HoldButton(type: .system)
     private let widthButton = HoldButton(type: .system)
     private let eraserButton = HoldButton(type: .system)
@@ -559,6 +563,18 @@ private final class TapeCanvasUIView: UIView {
         let size: CGFloat = 192
         layoutMenu(view: menuView, size: size, radius: 52, buttons: [colorButton, widthButton, eraserButton, proButton, exportButton])
         layoutMenu(view: colorMenuView, size: size, radius: 52, buttons: colorButtons)
+        menuBlurView.frame = menuView.bounds
+        menuTintOverlay.frame = menuView.bounds
+        menuBlurView.layer.cornerRadius = menuView.layer.cornerRadius
+        menuBlurView.layer.masksToBounds = true
+        menuTintOverlay.layer.cornerRadius = menuView.layer.cornerRadius
+        menuTintOverlay.layer.masksToBounds = true
+        colorMenuBlurView.frame = colorMenuView.bounds
+        colorMenuTintOverlay.frame = colorMenuView.bounds
+        colorMenuBlurView.layer.cornerRadius = colorMenuView.layer.cornerRadius
+        colorMenuBlurView.layer.masksToBounds = true
+        colorMenuTintOverlay.layer.cornerRadius = colorMenuView.layer.cornerRadius
+        colorMenuTintOverlay.layer.masksToBounds = true
     }
 
     private func drawNoise(in context: CGContext, rect: CGRect) {
@@ -604,15 +620,19 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func configureMenu() {
-        menuView.backgroundColor = UIColor(white: 1.0, alpha: 0.92)
+        menuView.backgroundColor = .clear
         menuView.layer.cornerRadius = 80
         menuView.layer.shadowColor = UIColor.black.cgColor
         menuView.layer.shadowOpacity = 0.1
         menuView.layer.shadowRadius = 10
         menuView.layer.shadowOffset = CGSize(width: 0, height: 4)
         menuView.layer.zPosition = 1000
+        menuView.layer.borderWidth = 1
         menuView.isHidden = true
         menuView.isUserInteractionEnabled = true
+
+        menuBlurView.isHidden = true
+        menuTintOverlay.isHidden = true
 
         configureHoldButton(
             colorButton,
@@ -646,8 +666,8 @@ private final class TapeCanvasUIView: UIView {
         )
 
         [colorButton, widthButton, eraserButton, proButton, exportButton].forEach {
-            $0.backgroundColor = UIColor(white: 1.0, alpha: 0.9)
-            $0.layer.cornerRadius = 36
+            $0.backgroundColor = .clear
+            $0.layer.cornerRadius = 0
             $0.frame.size = CGSize(width: 72, height: 72)
             menuView.addSubview($0)
         }
@@ -658,15 +678,19 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func configureColorMenu() {
-        colorMenuView.backgroundColor = UIColor(white: 1.0, alpha: 0.92)
+        colorMenuView.backgroundColor = .clear
         colorMenuView.layer.cornerRadius = 80
         colorMenuView.layer.shadowColor = UIColor.black.cgColor
         colorMenuView.layer.shadowOpacity = 0.1
         colorMenuView.layer.shadowRadius = 10
         colorMenuView.layer.shadowOffset = CGSize(width: 0, height: 4)
         colorMenuView.layer.zPosition = 1001
+        colorMenuView.layer.borderWidth = 0
         colorMenuView.isHidden = true
         colorMenuView.isUserInteractionEnabled = true
+
+        colorMenuBlurView.isHidden = true
+        colorMenuTintOverlay.isHidden = true
 
         colorButtons = colorSubPalette.enumerated().map { index, color in
             let button = HoldButton(type: .system)
@@ -679,6 +703,11 @@ private final class TapeCanvasUIView: UIView {
             )
             colorMenuView.addSubview(button)
             return button
+        }
+        colorButtons.forEach {
+            $0.backgroundColor = .clear
+            $0.layer.cornerRadius = 0
+            $0.frame.size = CGSize(width: 72, height: 72)
         }
 
         addSubview(colorMenuView)
@@ -717,9 +746,7 @@ private final class TapeCanvasUIView: UIView {
     func showMenuAtCenter() {
         menuCenter = CGPoint(x: bounds.midX, y: bounds.midY)
         colorMenuView.isHidden = true
-        menuView.isHidden = false
-        bringSubviewToFront(menuView)
-        setNeedsLayout()
+        showMenu(animated: true)
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
@@ -844,11 +871,58 @@ private final class TapeCanvasUIView: UIView {
         colorMenuView.isHidden = false
         bringSubviewToFront(colorMenuView)
         setNeedsLayout()
+        colorMenuView.alpha = 0
+        colorMenuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+        UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.colorMenuView.alpha = 1
+            self.colorMenuView.transform = .identity
+        }
     }
 
     private func hideMenuAfterSelection() {
-        menuView.isHidden = true
-        colorMenuView.isHidden = true
+        hideMenu(animated: true)
+    }
+
+    private func showMenu(animated: Bool) {
+        menuView.isHidden = false
+        bringSubviewToFront(menuView)
+        setNeedsLayout()
+        if animated {
+            menuView.alpha = 0
+            menuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+            UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                self.menuView.alpha = 1
+                self.menuView.transform = .identity
+            }
+        } else {
+            menuView.alpha = 1
+            menuView.transform = .identity
+        }
+    }
+
+    private func hideMenu(animated: Bool) {
+        if animated {
+            UIView.animate(withDuration: 0.14, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+                self.menuView.alpha = 0
+                self.menuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+                self.colorMenuView.alpha = 0
+                self.colorMenuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+            } completion: { _ in
+                self.menuView.isHidden = true
+                self.colorMenuView.isHidden = true
+                self.menuView.alpha = 1
+                self.menuView.transform = .identity
+                self.colorMenuView.alpha = 1
+                self.colorMenuView.transform = .identity
+            }
+        } else {
+            menuView.isHidden = true
+            colorMenuView.isHidden = true
+            menuView.alpha = 1
+            menuView.transform = .identity
+            colorMenuView.alpha = 1
+            colorMenuView.transform = .identity
+        }
     }
 
     private func findViewController() -> UIViewController? {
