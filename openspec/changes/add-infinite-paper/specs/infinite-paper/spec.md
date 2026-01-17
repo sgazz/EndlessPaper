@@ -53,7 +53,7 @@ The system SHALL retain only a limited session history for Free users and full s
 
 #### Scenario: Free session is not archived
 - **WHEN** a Free user closes the app
-- **THEN** the current session is not archived beyond the limited history
+- **THEN** only the most recent session is retained for up to 24 hours
 
 #### Scenario: Pro session is archived silently
 - **WHEN** a Pro user closes the app

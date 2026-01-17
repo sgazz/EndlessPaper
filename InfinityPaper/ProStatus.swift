@@ -1,5 +1,7 @@
 import Foundation
 import StoreKit
+import SwiftUI
+import Combine
 
 @MainActor
 final class ProStatus: ObservableObject {

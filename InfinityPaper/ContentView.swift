@@ -77,32 +77,43 @@ private final class TapeCanvasUIView: UIView {
         var lineWidth: CGFloat
     }
 
-    private struct StoredSession: Codable {
-        var strokes: [StoredStroke]
+    private struct Segment {
+        var id: Int
+        var strokes: [Stroke]
+    }
+
+    fileprivate struct StoredSession: Codable {
+        var segments: [StoredSegment]
         var contentOffset: StoredPoint
         var savedAt: TimeInterval
     }
 
-    private struct StoredStroke: Codable {
+    fileprivate struct StoredSegment: Codable {
+        var id: Int
+        var strokes: [StoredStroke]
+    }
+
+    fileprivate struct StoredStroke: Codable {
         var points: [StoredPoint]
         var color: StoredColor
         var lineWidth: CGFloat
     }
 
-    private struct StoredPoint: Codable {
+    fileprivate struct StoredPoint: Codable {
         var x: CGFloat
         var y: CGFloat
     }
 
-    private struct StoredColor: Codable {
+    fileprivate struct StoredColor: Codable {
         var red: CGFloat
         var green: CGFloat
         var blue: CGFloat
         var alpha: CGFloat
     }
 
-    private var strokes: [Stroke] = []
+    private var segments: [Int: Segment] = [:]
     private var currentStroke: Stroke?
+    private var currentStrokeSegmentId: Int?
     private var contentOffset: CGPoint = .zero
     private var displayLink: CADisplayLink?
     private var decelVelocity: CGFloat = 0
@@ -110,21 +121,33 @@ private final class TapeCanvasUIView: UIView {
     private let velocityStopThreshold: CGFloat = 4
     private let backgroundColorTone = UIColor(white: 0.98, alpha: 1.0)
     private var baseStrokeColor: UIColor = UIColor.black.withAlphaComponent(0.9)
+    private var colorPalette: [UIColor] = [
+        UIColor(red: 0.05, green: 0.9, blue: 1.0, alpha: 0.95),  // neon cyan
+        UIColor(red: 0.96, green: 0.2, blue: 0.84, alpha: 0.95),  // neon magenta
+        UIColor(red: 0.2, green: 1.0, blue: 0.45, alpha: 0.95),   // neon green
+        UIColor(red: 0.99, green: 0.78, blue: 0.1, alpha: 0.95),  // neon yellow
+        UIColor(red: 0.55, green: 0.35, blue: 1.0, alpha: 0.95)   // neon purple
+    ]
+    private var colorIndex: Int = 0
+    private var colorButtons: [HoldButton] = []
     private var baseLineWidth: CGFloat = 2.2
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
     private let menuView = UIView()
-    private let colorButton = UIButton(type: .system)
-    private let widthButton = UIButton(type: .system)
-    private let eraserButton = UIButton(type: .system)
-    private let proButton = UIButton(type: .system)
+    private let colorMenuView = UIView()
+    private let colorButton = HoldButton(type: .system)
+    private let widthButton = HoldButton(type: .system)
+    private let eraserButton = HoldButton(type: .system)
+    private let proButton = HoldButton(type: .system)
+    private let exportButton = HoldButton(type: .system)
     private var menuCenter: CGPoint = .zero
     private var didLoadSession: Bool = false
     private var telemetry = Telemetry()
     private let freeHistoryEnabled = true
     private let freeHistoryFileName = "session_free.json"
     private let proHistoryFileName = "session.json"
-    private let freeHistoryMaxAgeHours: Double = 12
+    private let freeHistoryMaxAgeHours: Double = 24
+    private var segmentWidth: CGFloat = 1
     var isProUser: Bool = false {
         didSet {
             if !didLoadSession {
@@ -143,6 +166,12 @@ private final class TapeCanvasUIView: UIView {
     private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         recognizer.minimumPressDuration = 0.5
+        recognizer.cancelsTouchesInView = false
+        return recognizer
+    }()
+    private lazy var tapRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        recognizer.cancelsTouchesInView = false
         return recognizer
     }()
 
@@ -151,6 +180,7 @@ private final class TapeCanvasUIView: UIView {
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(longPressRecognizer)
+        addGestureRecognizer(tapRecognizer)
         configureMenu()
         registerForAppLifecycle()
     }
@@ -160,6 +190,7 @@ private final class TapeCanvasUIView: UIView {
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(longPressRecognizer)
+        addGestureRecognizer(tapRecognizer)
         configureMenu()
         registerForAppLifecycle()
     }
@@ -174,8 +205,12 @@ private final class TapeCanvasUIView: UIView {
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
-        for stroke in strokes {
-            drawStroke(stroke, in: context)
+        let visibleIds = visibleSegmentIds()
+        for id in visibleIds {
+            guard let segment = segments[id] else { continue }
+            for stroke in segment.strokes {
+                drawStroke(stroke, in: context)
+            }
         }
 
         if let stroke = currentStroke {
@@ -197,6 +232,20 @@ private final class TapeCanvasUIView: UIView {
         context.strokePath()
     }
 
+    private func drawStrokeWorld(_ stroke: Stroke, in context: CGContext) {
+        guard stroke.points.count > 1 else { return }
+        context.setStrokeColor(stroke.color.cgColor)
+        context.setLineWidth(stroke.lineWidth)
+        let path = CGMutablePath()
+        let first = stroke.points[0]
+        path.move(to: first)
+        for point in stroke.points.dropFirst() {
+            path.addLine(to: point)
+        }
+        context.addPath(path)
+        context.strokePath()
+    }
+
     private func toWorldPoint(_ viewPoint: CGPoint) -> CGPoint {
         CGPoint(x: viewPoint.x + contentOffset.x, y: viewPoint.y + contentOffset.y)
     }
@@ -208,6 +257,7 @@ private final class TapeCanvasUIView: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
         guard longPressRecognizer.state == .possible || longPressRecognizer.state == .failed else { return }
+        if !menuView.isHidden { return }
         guard let touch = touches.first, touches.count == 1 else { return }
         stopDeceleration()
         let location = touch.location(in: self)
@@ -218,6 +268,7 @@ private final class TapeCanvasUIView: UIView {
             color: color,
             lineWidth: baseLineWidth
         )
+        currentStrokeSegmentId = segmentId(forWorldX: toWorldPoint(location).x)
         setNeedsDisplay()
     }
 
@@ -231,15 +282,19 @@ private final class TapeCanvasUIView: UIView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let stroke = currentStroke else { return }
-        strokes.append(stroke)
+        guard let stroke = currentStroke, let segmentId = currentStrokeSegmentId else { return }
+        var segment = segments[segmentId] ?? Segment(id: segmentId, strokes: [])
+        segment.strokes.append(stroke)
+        segments[segmentId] = segment
         telemetry.recordStroke(points: stroke.points.count)
         currentStroke = nil
+        currentStrokeSegmentId = nil
         setNeedsDisplay()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         currentStroke = nil
+        currentStrokeSegmentId = nil
         setNeedsDisplay()
     }
 
@@ -252,6 +307,7 @@ private final class TapeCanvasUIView: UIView {
             contentOffset.x -= translation.x
             telemetry.recordPan(deltaX: translation.x)
             recognizer.setTranslation(.zero, in: self)
+            updateSegmentsIfNeeded()
             setNeedsDisplay()
         case .ended, .cancelled:
             let velocity = recognizer.velocity(in: self)
@@ -285,6 +341,7 @@ private final class TapeCanvasUIView: UIView {
         contentOffset.x -= decelVelocity * dt
         telemetry.recordPan(deltaX: decelVelocity * dt)
         decelVelocity *= pow(decelRate, dt * 60)
+        updateSegmentsIfNeeded()
         setNeedsDisplay()
     }
 
@@ -312,21 +369,26 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func saveSession() {
-        let storedStrokes = strokes.map { stroke in
-            StoredStroke(
-                points: stroke.points.map { StoredPoint(x: $0.x, y: $0.y) },
-                color: stroke.color.toStoredColor(),
-                lineWidth: stroke.lineWidth
+        let storedSegments = segments.values.map { segment in
+            StoredSegment(
+                id: segment.id,
+                strokes: segment.strokes.map { stroke in
+                    StoredStroke(
+                        points: stroke.points.map { StoredPoint(x: $0.x, y: $0.y) },
+                        color: stroke.color.toStoredColor(),
+                        lineWidth: stroke.lineWidth
+                    )
+                }
             )
         }
         let storedSession = StoredSession(
-            strokes: storedStrokes,
+            segments: storedSegments,
             contentOffset: StoredPoint(x: contentOffset.x, y: contentOffset.y),
             savedAt: Date().timeIntervalSince1970
         )
         do {
             let data = try JSONEncoder().encode(storedSession)
-            try data.write(to: sessionURL(forPro: isProUser), options: [.atomic])
+            try data.write(to: sessionURL(forPro: isProUser), options: Data.WritingOptions.atomic)
         } catch {
             // Best-effort persistence; ignore errors in MVP.
         }
@@ -344,14 +406,17 @@ private final class TapeCanvasUIView: UIView {
                     return
                 }
             }
-            strokes = storedSession.strokes.map { stored in
-                Stroke(
-                    points: stored.points.map { CGPoint(x: $0.x, y: $0.y) },
-                    times: [],
-                    color: stored.color.toUIColor(),
-                    lineWidth: stored.lineWidth
-                )
-            }
+            segments = Dictionary(uniqueKeysWithValues: storedSession.segments.map { stored in
+                let strokes = stored.strokes.map { stroke in
+                    Stroke(
+                        points: stroke.points.map { CGPoint(x: $0.x, y: $0.y) },
+                        times: [],
+                        color: stroke.color.toUIColor(),
+                        lineWidth: stroke.lineWidth
+                    )
+                }
+                return (stored.id, Segment(id: stored.id, strokes: strokes))
+            })
             contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
             setNeedsDisplay()
         } catch {
@@ -374,6 +439,15 @@ private final class TapeCanvasUIView: UIView {
         return directory.appendingPathComponent(fileName)
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        segmentWidth = max(1, bounds.width * 1.5)
+        updateSegmentsIfNeeded()
+        let size: CGFloat = 192
+        layoutMenu(view: menuView, size: size, radius: 52, buttons: [colorButton, widthButton, eraserButton, proButton, exportButton])
+        layoutMenu(view: colorMenuView, size: size, radius: 52, buttons: colorButtons)
+    }
+
     private func drawNoise(in context: CGContext, rect: CGRect) {
         if noiseTile == nil {
             noiseTile = makeNoiseTile(size: 96)
@@ -381,6 +455,21 @@ private final class TapeCanvasUIView: UIView {
         guard let noiseTile else { return }
         UIColor(patternImage: noiseTile).setFill()
         context.fill(rect)
+    }
+
+    private func drawStrokesForExport(in context: CGContext) {
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        let visibleIds = visibleSegmentIds()
+        for id in visibleIds {
+            guard let segment = segments[id] else { continue }
+            for stroke in segment.strokes {
+                drawStrokeWorld(stroke, in: context)
+            }
+        }
+        if let stroke = currentStroke {
+            drawStrokeWorld(stroke, in: context)
+        }
     }
 
     private func makeNoiseTile(size: CGFloat) -> UIImage {
@@ -403,52 +492,111 @@ private final class TapeCanvasUIView: UIView {
 
     private func configureMenu() {
         menuView.backgroundColor = UIColor(white: 1.0, alpha: 0.92)
-        menuView.layer.cornerRadius = 40
+        menuView.layer.cornerRadius = 80
         menuView.layer.shadowColor = UIColor.black.cgColor
         menuView.layer.shadowOpacity = 0.1
         menuView.layer.shadowRadius = 10
         menuView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        menuView.layer.zPosition = 1000
         menuView.isHidden = true
+        menuView.isUserInteractionEnabled = true
 
-        colorButton.setImage(UIImage(systemName: "circle.fill"), for: .normal)
-        colorButton.tintColor = baseStrokeColor
-        colorButton.addTarget(self, action: #selector(handleColorTap), for: .touchUpInside)
+        configureHoldButton(
+            colorButton,
+            imageSystemName: "circle.fill",
+            tintColor: baseStrokeColor,
+            action: { [weak self] in self?.showColorMenu() }
+        )
+        configureHoldButton(
+            widthButton,
+            imageSystemName: "line.3.horizontal",
+            tintColor: UIColor.black.withAlphaComponent(0.7),
+            action: { [weak self] in self?.handleWidthTap() }
+        )
+        configureHoldButton(
+            eraserButton,
+            imageSystemName: "eraser",
+            tintColor: UIColor.black.withAlphaComponent(0.7),
+            action: { [weak self] in self?.handleEraserTap() }
+        )
+        configureHoldButton(
+            proButton,
+            imageSystemName: "crown",
+            tintColor: UIColor.black.withAlphaComponent(0.7),
+            action: { [weak self] in self?.handleProTap() }
+        )
+        configureHoldButton(
+            exportButton,
+            imageSystemName: "square.and.arrow.up",
+            tintColor: UIColor.black.withAlphaComponent(0.7),
+            action: { [weak self] in self?.handleExportTap() }
+        )
 
-        widthButton.setImage(UIImage(systemName: "line.3.horizontal"), for: .normal)
-        widthButton.tintColor = UIColor.black.withAlphaComponent(0.7)
-        widthButton.addTarget(self, action: #selector(handleWidthTap), for: .touchUpInside)
-
-        eraserButton.setImage(UIImage(systemName: "eraser"), for: .normal)
-        eraserButton.tintColor = UIColor.black.withAlphaComponent(0.7)
-        eraserButton.addTarget(self, action: #selector(handleEraserTap), for: .touchUpInside)
-
-        proButton.setImage(UIImage(systemName: "crown"), for: .normal)
-        proButton.addTarget(self, action: #selector(handleProTap), for: .touchUpInside)
-
-        [colorButton, widthButton, eraserButton, proButton].forEach {
+        [colorButton, widthButton, eraserButton, proButton, exportButton].forEach {
             $0.backgroundColor = UIColor(white: 1.0, alpha: 0.9)
-            $0.layer.cornerRadius = 18
-            $0.frame.size = CGSize(width: 36, height: 36)
+            $0.layer.cornerRadius = 36
+            $0.frame.size = CGSize(width: 72, height: 72)
             menuView.addSubview($0)
         }
         updateProButtonAppearance()
 
         addSubview(menuView)
+
+        configureColorMenu()
     }
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let size: CGFloat = 80
-        menuView.frame = CGRect(x: menuCenter.x - size / 2, y: menuCenter.y - size / 2, width: size, height: size)
-        let radius: CGFloat = 26
-        let center = CGPoint(x: size / 2, y: size / 2)
-        let angles: [CGFloat] = [-CGFloat.pi / 2, 0, CGFloat.pi / 2, CGFloat.pi]
-        let buttons = [colorButton, widthButton, eraserButton, proButton]
-        for (index, button) in buttons.enumerated() {
-            let angle = angles[index]
-            let x = center.x + radius * cos(angle) - 18
-            let y = center.y + radius * sin(angle) - 18
-            button.frame = CGRect(x: x, y: y, width: 36, height: 36)
+    private func configureColorMenu() {
+        colorMenuView.backgroundColor = UIColor(white: 1.0, alpha: 0.92)
+        colorMenuView.layer.cornerRadius = 80
+        colorMenuView.layer.shadowColor = UIColor.black.cgColor
+        colorMenuView.layer.shadowOpacity = 0.1
+        colorMenuView.layer.shadowRadius = 10
+        colorMenuView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        colorMenuView.layer.zPosition = 1001
+        colorMenuView.isHidden = true
+        colorMenuView.isUserInteractionEnabled = true
+
+        colorButtons = colorPalette.enumerated().map { index, color in
+            let button = HoldButton(type: .system)
+            configureHoldButton(
+                button,
+                imageSystemName: "circle.fill",
+                tintColor: color,
+                action: { [weak self] in self?.handleColorSelect(index: index) }
+            )
+            colorMenuView.addSubview(button)
+            return button
+        }
+
+        addSubview(colorMenuView)
+    }
+
+    private func segmentId(forWorldX worldX: CGFloat) -> Int {
+        guard segmentWidth > 0 else { return 0 }
+        return Int(floor(worldX / segmentWidth))
+    }
+
+    private func visibleSegmentIds() -> [Int] {
+        guard segmentWidth > 0 else { return [] }
+        let minX = contentOffset.x
+        let maxX = contentOffset.x + bounds.width
+        let startId = segmentId(forWorldX: minX) - 1
+        let endId = segmentId(forWorldX: maxX) + 1
+        return Array(startId...endId)
+    }
+
+    private func updateSegmentsIfNeeded() {
+        guard segmentWidth > 0 else { return }
+        let visibleIds = Set(visibleSegmentIds())
+        for id in visibleIds {
+            if segments[id] == nil {
+                segments[id] = Segment(id: id, strokes: [])
+            }
+        }
+        let keepIds = Set(visibleIds.union([segmentId(forWorldX: contentOffset.x)]))
+        let pruneIds = segments.keys.filter { !keepIds.contains($0) }
+        for id in pruneIds {
+            segments.removeValue(forKey: id)
         }
     }
 
@@ -457,30 +605,51 @@ private final class TapeCanvasUIView: UIView {
         case .began:
             menuCenter = recognizer.location(in: self)
             menuView.isHidden = false
+            bringSubviewToFront(menuView)
             setNeedsLayout()
         case .ended, .cancelled, .failed:
-            menuView.isHidden = true
+            break
         default:
             break
         }
     }
 
-    @objc private func handleColorTap() {
-        if baseStrokeColor == UIColor.black.withAlphaComponent(0.9) {
-            baseStrokeColor = UIColor(red: 0.12, green: 0.2, blue: 0.35, alpha: 0.9)
-        } else {
-            baseStrokeColor = UIColor.black.withAlphaComponent(0.9)
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard !menuView.isHidden || !colorMenuView.isHidden else { return }
+        let location = recognizer.location(in: self)
+        if !menuView.frame.contains(location) && !colorMenuView.frame.contains(location) {
+            hideMenuAfterSelection()
+        }
+    }
+
+    private func handleColorSelect(index: Int) {
+        guard colorPalette.indices.contains(index) else { return }
+        colorIndex = index
+        baseStrokeColor = colorPalette[index]
+        if isEraser {
+            isEraser = false
+            eraserButton.tintColor = UIColor.black.withAlphaComponent(0.7)
         }
         colorButton.tintColor = baseStrokeColor
+        hideMenuAfterSelection()
     }
 
     @objc private func handleWidthTap() {
-        baseLineWidth = baseLineWidth < 3.5 ? 4.2 : 2.2
+        switch baseLineWidth {
+        case ..<3:
+            baseLineWidth = 4.2
+        case ..<5:
+            baseLineWidth = 6.2
+        default:
+            baseLineWidth = 2.2
+        }
+        hideMenuAfterSelection()
     }
 
     @objc private func handleEraserTap() {
         isEraser.toggle()
         eraserButton.tintColor = isEraser ? UIColor.systemBlue : UIColor.black.withAlphaComponent(0.7)
+        hideMenuAfterSelection()
     }
 
     @objc private func handleProTap() {
@@ -489,11 +658,146 @@ private final class TapeCanvasUIView: UIView {
             guard let self else { return }
             _ = await onPurchasePro?()
             updateProButtonAppearance()
+            hideMenuAfterSelection()
         }
+    }
+
+    @objc private func handleExportTap() {
+        guard isProUser else {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            hideMenuAfterSelection()
+            return
+        }
+        exportVisiblePDF()
+        hideMenuAfterSelection()
+    }
+
+    private func exportVisiblePDF() {
+        let pageBounds = bounds
+        let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+        let data = renderer.pdfData { context in
+            context.beginPage()
+            let cgContext = context.cgContext
+            cgContext.setFillColor(UIColor.white.cgColor)
+            cgContext.fill(pageBounds)
+            cgContext.translateBy(x: -contentOffset.x, y: -contentOffset.y)
+            drawStrokesForExport(in: cgContext)
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("InfinityPaper.pdf")
+        do {
+            try data.write(to: tempURL, options: Data.WritingOptions.atomic)
+            presentShare(url: tempURL)
+        } catch {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    private func presentShare(url: URL) {
+        guard let controller = findViewController() else { return }
+        let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = self
+        activity.popoverPresentationController?.sourceRect = CGRect(x: menuCenter.x, y: menuCenter.y, width: 1, height: 1)
+        controller.present(activity, animated: true)
     }
 
     private func updateProButtonAppearance() {
         proButton.tintColor = isProUser ? UIColor.systemGreen : UIColor.black.withAlphaComponent(0.7)
+    }
+
+    private func configureHoldButton(
+        _ button: HoldButton,
+        imageSystemName: String,
+        tintColor: UIColor,
+        action: @escaping () -> Void
+    ) {
+        button.setImage(UIImage(systemName: imageSystemName), for: .normal)
+        button.tintColor = tintColor
+        button.onHold = action
+        button.onHighlight = { [weak button] isHighlighted in
+            button?.alpha = isHighlighted ? 0.85 : 1.0
+        }
+    }
+
+    private func showColorMenu() {
+        colorMenuView.isHidden = false
+        bringSubviewToFront(colorMenuView)
+        setNeedsLayout()
+    }
+
+    private func layoutMenu(view: UIView, size: CGFloat, radius: CGFloat, buttons: [UIButton]) {
+        guard !buttons.isEmpty else { return }
+        view.frame = CGRect(x: menuCenter.x - size / 2, y: menuCenter.y - size / 2, width: size, height: size)
+        let center = CGPoint(x: size / 2, y: size / 2)
+        let angles: [CGFloat] = [-CGFloat.pi / 2, -CGFloat.pi * 0.1, CGFloat.pi * 0.3, CGFloat.pi * 0.7, CGFloat.pi * 1.1]
+        for (index, button) in buttons.enumerated() {
+            let angle = angles[index % angles.count]
+            let x = center.x + radius * cos(angle) - 36
+            let y = center.y + radius * sin(angle) - 36
+            button.frame = CGRect(x: x, y: y, width: 72, height: 72)
+        }
+    }
+
+    private func hideMenuAfterSelection() {
+        menuView.isHidden = true
+        colorMenuView.isHidden = true
+    }
+
+    private func findViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let next = responder?.next {
+            if let vc = next as? UIViewController {
+                return vc
+            }
+            responder = next
+        }
+        return nil
+    }
+}
+
+private final class HoldButton: UIButton {
+    var onHold: (() -> Void)?
+    var onHighlight: ((Bool) -> Void)?
+    private let feedback = UISelectionFeedbackGenerator()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
+        recognizer.minimumPressDuration = 0.15
+        recognizer.allowableMovement = 30
+        addGestureRecognizer(recognizer)
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let extended = bounds.insetBy(dx: -12, dy: -12)
+        return extended.contains(point)
+    }
+
+    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            onHighlight?(true)
+            feedback.selectionChanged()
+        case .ended:
+            onHighlight?(false)
+            let location = recognizer.location(in: self)
+            if bounds.contains(location) {
+                onHold?()
+            }
+        case .cancelled, .failed:
+            onHighlight?(false)
+        default:
+            break
+        }
     }
 }
 
