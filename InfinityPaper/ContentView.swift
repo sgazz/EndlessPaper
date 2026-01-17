@@ -25,7 +25,7 @@ struct ContentView: View {
             .ignoresSafeArea()
 
             Circle()
-                .fill(Color.orange.opacity(0.95))
+                .fill(Color(red: 0.18, green: 0.18, blue: 0.18, opacity: 0.9))
                 .frame(width: 22, height: 22)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
@@ -148,7 +148,7 @@ private final class TapeCanvasUIView: UIView {
     private let decelRate: CGFloat = 0.92
     private let velocityStopThreshold: CGFloat = 4
     private let backgroundColorTone = UIColor(white: 0.98, alpha: 1.0)
-    private var baseStrokeColor: UIColor = UIColor.black.withAlphaComponent(0.9)
+    private var baseStrokeColor: UIColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
     private var colorPalette: [UIColor] = [
         UIColor(red: 0.05, green: 0.9, blue: 1.0, alpha: 0.95),  // neon cyan
         UIColor(red: 0.96, green: 0.2, blue: 0.84, alpha: 0.95),  // neon magenta
@@ -157,12 +157,10 @@ private final class TapeCanvasUIView: UIView {
         UIColor(red: 0.55, green: 0.35, blue: 1.0, alpha: 0.95)   // neon purple
     ]
     private var colorIndex: Int = 0
-    private var colorButtons: [HoldButton] = []
     private var baseLineWidth: CGFloat = 2.2
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
     private let menuView = UIView()
-    private let colorMenuView = UIView()
     private let colorButton = HoldButton(type: .system)
     private let widthButton = HoldButton(type: .system)
     private let eraserButton = HoldButton(type: .system)
@@ -497,7 +495,6 @@ private final class TapeCanvasUIView: UIView {
         updateSegmentsIfNeeded()
         let size: CGFloat = 192
         layoutMenu(view: menuView, size: size, radius: 52, buttons: [colorButton, widthButton, eraserButton, proButton, exportButton])
-        layoutMenu(view: colorMenuView, size: size, radius: 52, buttons: colorButtons)
     }
 
     private func drawNoise(in context: CGContext, rect: CGRect) {
@@ -557,7 +554,7 @@ private final class TapeCanvasUIView: UIView {
             colorButton,
             imageSystemName: "circle.fill",
             tintColor: baseStrokeColor,
-            action: { [weak self] in self?.showColorMenu() }
+            action: { [weak self] in self?.handleColorTap() }
         )
         configureHoldButton(
             widthButton,
@@ -593,34 +590,6 @@ private final class TapeCanvasUIView: UIView {
         updateProButtonAppearance()
 
         addSubview(menuView)
-
-        configureColorMenu()
-    }
-
-    private func configureColorMenu() {
-        colorMenuView.backgroundColor = UIColor(white: 1.0, alpha: 0.92)
-        colorMenuView.layer.cornerRadius = 80
-        colorMenuView.layer.shadowColor = UIColor.black.cgColor
-        colorMenuView.layer.shadowOpacity = 0.1
-        colorMenuView.layer.shadowRadius = 10
-        colorMenuView.layer.shadowOffset = CGSize(width: 0, height: 4)
-        colorMenuView.layer.zPosition = 1001
-        colorMenuView.isHidden = true
-        colorMenuView.isUserInteractionEnabled = true
-
-        colorButtons = colorPalette.enumerated().map { index, color in
-            let button = HoldButton(type: .system)
-            configureHoldButton(
-                button,
-                imageSystemName: "circle.fill",
-                tintColor: color,
-                action: { [weak self] in self?.handleColorSelect(index: index) }
-            )
-            colorMenuView.addSubview(button)
-            return button
-        }
-
-        addSubview(colorMenuView)
     }
 
     private func segmentId(forWorldX worldX: CGFloat) -> Int {
@@ -655,24 +624,23 @@ private final class TapeCanvasUIView: UIView {
 
     func showMenuAtCenter() {
         menuCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-        colorMenuView.isHidden = true
         menuView.isHidden = false
         bringSubviewToFront(menuView)
         setNeedsLayout()
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
-        guard !menuView.isHidden || !colorMenuView.isHidden else { return }
+        guard !menuView.isHidden else { return }
         let location = recognizer.location(in: self)
-        if !menuView.frame.contains(location) && !colorMenuView.frame.contains(location) {
+        if !menuView.frame.contains(location) {
             hideMenuAfterSelection()
         }
     }
 
-    private func handleColorSelect(index: Int) {
-        guard colorPalette.indices.contains(index) else { return }
-        colorIndex = index
-        baseStrokeColor = colorPalette[index]
+    @objc private func handleColorTap() {
+        guard !colorPalette.isEmpty else { return }
+        colorIndex = (colorIndex + 1) % colorPalette.count
+        baseStrokeColor = colorPalette[colorIndex]
         if isEraser {
             isEraser = false
             eraserButton.tintColor = UIColor.black.withAlphaComponent(0.7)
@@ -756,20 +724,16 @@ private final class TapeCanvasUIView: UIView {
         _ button: HoldButton,
         imageSystemName: String,
         tintColor: UIColor,
+        triggerOnBegin: Bool = false,
         action: @escaping () -> Void
     ) {
         button.setImage(UIImage(systemName: imageSystemName), for: .normal)
         button.tintColor = tintColor
         button.onHold = action
+        button.triggerOnBegin = triggerOnBegin
         button.onHighlight = { [weak button] isHighlighted in
             button?.alpha = isHighlighted ? 0.85 : 1.0
         }
-    }
-
-    private func showColorMenu() {
-        colorMenuView.isHidden = false
-        bringSubviewToFront(colorMenuView)
-        setNeedsLayout()
     }
 
     private func layoutMenu(view: UIView, size: CGFloat, radius: CGFloat, buttons: [UIButton]) {
@@ -787,7 +751,6 @@ private final class TapeCanvasUIView: UIView {
 
     private func hideMenuAfterSelection() {
         menuView.isHidden = true
-        colorMenuView.isHidden = true
     }
 
     private func findViewController() -> UIViewController? {
@@ -805,6 +768,7 @@ private final class TapeCanvasUIView: UIView {
 private final class HoldButton: UIButton {
     var onHold: (() -> Void)?
     var onHighlight: ((Bool) -> Void)?
+    var triggerOnBegin: Bool = false
     private let feedback = UISelectionFeedbackGenerator()
 
     override init(frame: CGRect) {
@@ -825,7 +789,7 @@ private final class HoldButton: UIButton {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        let extended = bounds.insetBy(dx: -12, dy: -12)
+        let extended = bounds.insetBy(dx: -20, dy: -20)
         return extended.contains(point)
     }
 
@@ -834,6 +798,9 @@ private final class HoldButton: UIButton {
         case .began:
             onHighlight?(true)
             feedback.selectionChanged()
+            if triggerOnBegin {
+                onHold?()
+            }
         case .ended:
             onHighlight?(false)
             let location = recognizer.location(in: self)
