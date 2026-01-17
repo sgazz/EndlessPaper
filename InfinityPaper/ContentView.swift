@@ -627,7 +627,7 @@ private final class TapeCanvasUIView: UIView {
         menuView.layer.shadowRadius = 10
         menuView.layer.shadowOffset = CGSize(width: 0, height: 4)
         menuView.layer.zPosition = 1000
-        menuView.layer.borderWidth = 1
+        menuView.layer.borderWidth = 0
         menuView.isHidden = true
         menuView.isUserInteractionEnabled = true
 
