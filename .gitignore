@@ -1,0 +1,4 @@
+**/xcuserdata/
+**/*.xcuserstate
+**/project.xcworkspace/xcuserdata/
+**/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings

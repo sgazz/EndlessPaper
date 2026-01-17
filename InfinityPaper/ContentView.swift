@@ -116,6 +116,9 @@ private final class TapeCanvasUIView: UIView {
     private var currentStrokeSegmentId: Int?
     private var contentOffset: CGPoint = .zero
     private var displayLink: CADisplayLink?
+    private var autoScrollLink: CADisplayLink?
+    private var lastTouchLocation: CGPoint?
+    private let autoScrollSpeed: CGFloat = 90
     private var decelVelocity: CGFloat = 0
     private let decelRate: CGFloat = 0.92
     private let velocityStopThreshold: CGFloat = 4
@@ -163,9 +166,9 @@ private final class TapeCanvasUIView: UIView {
         recognizer.maximumNumberOfTouches = 2
         return recognizer
     }()
-    private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
-        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-        recognizer.minimumPressDuration = 0.5
+    private lazy var menuTriggerRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleMenuTrigger(_:)))
+        recognizer.numberOfTouchesRequired = 3
         recognizer.cancelsTouchesInView = false
         return recognizer
     }()
@@ -179,7 +182,7 @@ private final class TapeCanvasUIView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
-        addGestureRecognizer(longPressRecognizer)
+        addGestureRecognizer(menuTriggerRecognizer)
         addGestureRecognizer(tapRecognizer)
         configureMenu()
         registerForAppLifecycle()
@@ -189,7 +192,7 @@ private final class TapeCanvasUIView: UIView {
         super.init(coder: coder)
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
-        addGestureRecognizer(longPressRecognizer)
+        addGestureRecognizer(menuTriggerRecognizer)
         addGestureRecognizer(tapRecognizer)
         configureMenu()
         registerForAppLifecycle()
@@ -256,11 +259,11 @@ private final class TapeCanvasUIView: UIView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
-        guard longPressRecognizer.state == .possible || longPressRecognizer.state == .failed else { return }
         if !menuView.isHidden { return }
         guard let touch = touches.first, touches.count == 1 else { return }
         stopDeceleration()
         let location = touch.location(in: self)
+        lastTouchLocation = location
         let color = isEraser ? backgroundColorTone : baseStrokeColor
         currentStroke = Stroke(
             points: [toWorldPoint(location)],
@@ -269,6 +272,7 @@ private final class TapeCanvasUIView: UIView {
             lineWidth: baseLineWidth
         )
         currentStrokeSegmentId = segmentId(forWorldX: toWorldPoint(location).x)
+        startAutoScrollIfNeeded()
         setNeedsDisplay()
     }
 
@@ -276,6 +280,7 @@ private final class TapeCanvasUIView: UIView {
         guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
         guard let touch = touches.first, touches.count == 1 else { return }
         let location = touch.location(in: self)
+        lastTouchLocation = location
         currentStroke?.points.append(toWorldPoint(location))
         currentStroke?.times.append(touch.timestamp)
         setNeedsDisplay()
@@ -289,12 +294,16 @@ private final class TapeCanvasUIView: UIView {
         telemetry.recordStroke(points: stroke.points.count)
         currentStroke = nil
         currentStrokeSegmentId = nil
+        lastTouchLocation = nil
+        stopAutoScroll()
         setNeedsDisplay()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         currentStroke = nil
         currentStrokeSegmentId = nil
+        lastTouchLocation = nil
+        stopAutoScroll()
         setNeedsDisplay()
     }
 
@@ -341,6 +350,32 @@ private final class TapeCanvasUIView: UIView {
         contentOffset.x -= decelVelocity * dt
         telemetry.recordPan(deltaX: decelVelocity * dt)
         decelVelocity *= pow(decelRate, dt * 60)
+        updateSegmentsIfNeeded()
+        setNeedsDisplay()
+    }
+
+    private func startAutoScrollIfNeeded() {
+        guard autoScrollLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(handleAutoScroll))
+        link.add(to: .main, forMode: .common)
+        autoScrollLink = link
+    }
+
+    private func stopAutoScroll() {
+        autoScrollLink?.invalidate()
+        autoScrollLink = nil
+    }
+
+    @objc private func handleAutoScroll() {
+        guard let lastTouchLocation, currentStroke != nil else {
+            stopAutoScroll()
+            return
+        }
+        let dt = CGFloat(autoScrollLink?.duration ?? 1.0 / 60.0)
+        contentOffset.x += autoScrollSpeed * dt
+        let worldPoint = toWorldPoint(lastTouchLocation)
+        currentStroke?.points.append(worldPoint)
+        currentStroke?.times.append(CACurrentMediaTime())
         updateSegmentsIfNeeded()
         setNeedsDisplay()
     }
@@ -600,18 +635,12 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
-    @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
-        switch recognizer.state {
-        case .began:
-            menuCenter = recognizer.location(in: self)
-            menuView.isHidden = false
-            bringSubviewToFront(menuView)
-            setNeedsLayout()
-        case .ended, .cancelled, .failed:
-            break
-        default:
-            break
-        }
+    @objc private func handleMenuTrigger(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        menuCenter = recognizer.location(in: self)
+        menuView.isHidden = false
+        bringSubviewToFront(menuView)
+        setNeedsLayout()
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
