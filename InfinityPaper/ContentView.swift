@@ -167,20 +167,23 @@ private final class TapeCanvasUIView: UIView {
     private let colorMenuView = UIView()
     private let colorMenuBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let colorMenuTintOverlay = UIView()
-    private let colorButton = HoldButton(type: .system)
-    private let widthButton = HoldButton(type: .system)
-    private let eraserButton = HoldButton(type: .system)
-    private let proButton = HoldButton(type: .system)
-    private let exportButton = HoldButton(type: .system)
+    private let colorButton = UIButton(type: .system)
+    private let widthButton = UIButton(type: .system)
+    private let eraserButton = UIButton(type: .system)
+    private let proButton = UIButton(type: .system)
+    private let exportButton = UIButton(type: .system)
+    private let settingsButton = UIButton(type: .system)
+    private let sparklesButton = UIButton(type: .system)
     private var menuCenter: CGPoint = .zero
     private let colorSubPalette: [UIColor] = [
-        UIColor(red: 0.12, green: 0.9, blue: 0.98, alpha: 0.95),  // neon cyan 2
+        UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9),   // graphite
+        UIColor(red: 0.12, green: 0.9, blue: 0.98, alpha: 0.95),   // neon cyan 2
         UIColor(red: 1.0, green: 0.35, blue: 0.78, alpha: 0.95),   // neon pink
         UIColor(red: 0.72, green: 0.45, blue: 1.0, alpha: 0.95),   // neon violet
         UIColor(red: 0.98, green: 0.42, blue: 0.12, alpha: 0.95),  // neon orange
         UIColor(red: 0.22, green: 1.0, blue: 0.85, alpha: 0.95)    // neon mint
     ]
-    private var colorButtons: [HoldButton] = []
+    private var colorButtons: [UIButton] = []
     private var didLoadSession: Bool = false
     private var telemetry = Telemetry()
     private let freeHistoryEnabled = true
@@ -561,8 +564,18 @@ private final class TapeCanvasUIView: UIView {
         segmentWidth = max(1, bounds.width * 1.5)
         updateSegmentsIfNeeded()
         let size: CGFloat = 192
-        layoutMenu(view: menuView, size: size, radius: 52, buttons: [colorButton, widthButton, eraserButton, proButton, exportButton])
-        layoutMenu(view: colorMenuView, size: size, radius: 52, buttons: colorButtons)
+        layoutMenuSlots(
+            view: menuView,
+            size: size,
+            radius: 52,
+            slots: [colorButton, widthButton, settingsButton, proButton, exportButton, sparklesButton]
+        )
+        layoutMenuSlots(
+            view: colorMenuView,
+            size: size,
+            radius: 52,
+            slots: colorButtons.map { Optional($0) }
+        )
         menuBlurView.frame = menuView.bounds
         menuTintOverlay.frame = menuView.bounds
         menuBlurView.layer.cornerRadius = menuView.layer.cornerRadius
@@ -634,38 +647,50 @@ private final class TapeCanvasUIView: UIView {
         menuBlurView.isHidden = true
         menuTintOverlay.isHidden = true
 
-        configureHoldButton(
+        configureTapButton(
             colorButton,
             imageSystemName: "circle.fill",
             tintColor: graphiteColor,
             action: { [weak self] in self?.showColorMenu() }
         )
-        configureHoldButton(
+        configureTapButton(
             widthButton,
             imageSystemName: "line.3.horizontal",
-            tintColor: UIColor.black.withAlphaComponent(0.7),
+            tintColor: graphiteColor,
             action: { [weak self] in self?.handleWidthTap() }
         )
-        configureHoldButton(
+        configureTapButton(
             eraserButton,
             imageSystemName: "eraser",
-            tintColor: UIColor.black.withAlphaComponent(0.7),
+            tintColor: graphiteColor,
             action: { [weak self] in self?.handleEraserTap() }
         )
-        configureHoldButton(
+        configureTapButton(
             proButton,
             imageSystemName: "crown",
-            tintColor: UIColor.black.withAlphaComponent(0.7),
+            tintColor: graphiteColor,
             action: { [weak self] in self?.handleProTap() }
         )
-        configureHoldButton(
+        configureTapButton(
             exportButton,
             imageSystemName: "square.and.arrow.up",
-            tintColor: UIColor.black.withAlphaComponent(0.7),
+            tintColor: graphiteColor,
             action: { [weak self] in self?.handleExportTap() }
         )
+        configureTapButton(
+            settingsButton,
+            imageSystemName: "gearshape",
+            tintColor: graphiteColor,
+            action: { [weak self] in self?.handleSettingsTap() }
+        )
+        configureTapButton(
+            sparklesButton,
+            imageSystemName: "sparkles",
+            tintColor: graphiteColor,
+            action: { [weak self] in self?.handleSparklesTap() }
+        )
 
-        [colorButton, widthButton, eraserButton, proButton, exportButton].forEach {
+        [colorButton, widthButton, settingsButton, proButton, exportButton, sparklesButton].forEach {
             $0.backgroundColor = .clear
             $0.layer.cornerRadius = 0
             $0.frame.size = CGSize(width: 72, height: 72)
@@ -693,12 +718,11 @@ private final class TapeCanvasUIView: UIView {
         colorMenuTintOverlay.isHidden = true
 
         colorButtons = colorSubPalette.enumerated().map { index, color in
-            let button = HoldButton(type: .system)
-            configureHoldButton(
+            let button = UIButton(type: .system)
+            configureTapButton(
                 button,
                 imageSystemName: "circle.fill",
                 tintColor: color,
-                triggerOnBegin: true,
                 action: { [weak self] in self?.handleColorSelect(index: index) }
             )
             colorMenuView.addSubview(button)
@@ -805,6 +829,16 @@ private final class TapeCanvasUIView: UIView {
         hideMenuAfterSelection()
     }
 
+    @objc private func handleSettingsTap() {
+        // Placeholder for future settings UI.
+        hideMenuAfterSelection()
+    }
+
+    @objc private func handleSparklesTap() {
+        // Placeholder for future feature.
+        hideMenuAfterSelection()
+    }
+
     private func exportVisiblePDF() {
         let pageBounds = bounds
         let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
@@ -838,28 +872,39 @@ private final class TapeCanvasUIView: UIView {
         proButton.tintColor = isProUser ? UIColor.systemGreen : UIColor.black.withAlphaComponent(0.7)
     }
 
-    private func configureHoldButton(
-        _ button: HoldButton,
+    private func configureTapButton(
+        _ button: UIButton,
         imageSystemName: String,
         tintColor: UIColor,
-        triggerOnBegin: Bool = false,
         action: @escaping () -> Void
     ) {
         button.setImage(UIImage(systemName: imageSystemName), for: .normal)
         button.tintColor = tintColor
-        button.onHold = action
-        button.triggerOnBegin = triggerOnBegin
-        button.onHighlight = { [weak button] isHighlighted in
-            button?.alpha = isHighlighted ? 0.85 : 1.0
-        }
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.25
+        button.layer.shadowRadius = 2
+        button.layer.shadowOffset = CGSize(width: 0, height: 1)
+        button.layer.masksToBounds = false
+        button.addAction(UIAction { _ in
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        }, for: .touchUpInside)
     }
 
-    private func layoutMenu(view: UIView, size: CGFloat, radius: CGFloat, buttons: [UIButton]) {
-        guard !buttons.isEmpty else { return }
+    private func layoutMenuSlots(view: UIView, size: CGFloat, radius: CGFloat, slots: [UIButton?]) {
+        guard !slots.isEmpty else { return }
         view.frame = CGRect(x: menuCenter.x - size / 2, y: menuCenter.y - size / 2, width: size, height: size)
         let center = CGPoint(x: size / 2, y: size / 2)
-        let angles: [CGFloat] = [-CGFloat.pi / 2, -CGFloat.pi * 0.1, CGFloat.pi * 0.3, CGFloat.pi * 0.7, CGFloat.pi * 1.1]
-        for (index, button) in buttons.enumerated() {
+        let angles: [CGFloat] = [
+            -CGFloat.pi / 2,
+            -CGFloat.pi / 6,
+            CGFloat.pi / 6,
+            CGFloat.pi / 2,
+            CGFloat.pi * 5 / 6,
+            -CGFloat.pi * 5 / 6
+        ]
+        for (index, button) in slots.enumerated() {
+            guard let button else { continue }
             let angle = angles[index % angles.count]
             let x = center.x + radius * cos(angle) - 36
             let y = center.y + radius * sin(angle) - 36
@@ -868,6 +913,7 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func showColorMenu() {
+        menuView.isHidden = true
         colorMenuView.isHidden = false
         bringSubviewToFront(colorMenuView)
         setNeedsLayout()
@@ -934,56 +980,6 @@ private final class TapeCanvasUIView: UIView {
             responder = next
         }
         return nil
-    }
-}
-
-private final class HoldButton: UIButton {
-    var onHold: (() -> Void)?
-    var onHighlight: ((Bool) -> Void)?
-    var triggerOnBegin: Bool = false
-    private let feedback = UISelectionFeedbackGenerator()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        configure()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configure()
-    }
-
-    private func configure() {
-        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
-        recognizer.minimumPressDuration = 0.15
-        recognizer.allowableMovement = 30
-        addGestureRecognizer(recognizer)
-    }
-
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        let extended = bounds.insetBy(dx: -4, dy: -4)
-        return extended.contains(point)
-    }
-
-    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
-        switch recognizer.state {
-        case .began:
-            onHighlight?(true)
-            feedback.selectionChanged()
-            if triggerOnBegin {
-                onHold?()
-            }
-        case .ended:
-            onHighlight?(false)
-            let location = recognizer.location(in: self)
-            if bounds.contains(location) {
-                onHold?()
-            }
-        case .cancelled, .failed:
-            onHighlight?(false)
-        default:
-            break
-        }
     }
 }
 
