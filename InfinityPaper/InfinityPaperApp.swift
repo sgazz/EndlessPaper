@@ -15,9 +15,6 @@ struct InfinityPaperApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(proStatus)
-                .task {
-                    await proStatus.restorePurchases()
-                }
         }
     }
 }

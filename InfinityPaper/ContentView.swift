@@ -20,6 +20,9 @@ struct ContentView: View {
                 menuTrigger: menuTrigger,
                 purchasePro: {
                     await proStatus.purchasePro()
+                },
+                restorePurchases: {
+                    await proStatus.restorePurchases()
                 }
             )
             .ignoresSafeArea()
@@ -46,14 +49,16 @@ private struct TapeCanvasView: View {
     let isProUser: Bool
     let scenePhase: ScenePhase
     let menuTrigger: Int
-    let purchasePro: () async -> Bool
+    let purchasePro: () async -> PurchaseOutcome
+    let restorePurchases: () async -> Void
 
     var body: some View {
         TapeCanvasRepresentable(
             isProUser: isProUser,
             scenePhase: scenePhase,
             menuTrigger: menuTrigger,
-            purchasePro: purchasePro
+            purchasePro: purchasePro,
+            restorePurchases: restorePurchases
         )
             .ignoresSafeArea()
     }
@@ -63,7 +68,8 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
     let isProUser: Bool
     let scenePhase: ScenePhase
     let menuTrigger: Int
-    let purchasePro: () async -> Bool
+    let purchasePro: () async -> PurchaseOutcome
+    let restorePurchases: () async -> Void
 
     final class Coordinator {
         var lastMenuTrigger: Int = 0
@@ -74,12 +80,14 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
         view.backgroundColor = UIColor(white: 0.98, alpha: 1.0)
         view.isProUser = isProUser
         view.onPurchasePro = purchasePro
+        view.onRestorePurchases = restorePurchases
         return view
     }
 
     func updateUIView(_ uiView: TapeCanvasUIView, context: Context) {
         uiView.isProUser = isProUser
         uiView.onPurchasePro = purchasePro
+        uiView.onRestorePurchases = restorePurchases
         if scenePhase == .background {
             uiView.persistSessionIfNeeded()
         }
@@ -191,6 +199,8 @@ private final class TapeCanvasUIView: UIView {
     private let proHistoryFileName = "session.json"
     private let freeHistoryMaxAgeHours: Double = 24
     private var segmentWidth: CGFloat = 1
+    private let toastLabel = UILabel()
+    private var toastTimer: Timer?
     var isProUser: Bool = false {
         didSet {
             if !didLoadSession {
@@ -199,7 +209,8 @@ private final class TapeCanvasUIView: UIView {
             updateProButtonAppearance()
         }
     }
-    var onPurchasePro: (() async -> Bool)?
+    var onPurchasePro: (() async -> PurchaseOutcome)?
+    var onRestorePurchases: (() async -> Void)?
     private lazy var panRecognizer: UIPanGestureRecognizer = {
         let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         recognizer.minimumNumberOfTouches = 2
@@ -218,6 +229,7 @@ private final class TapeCanvasUIView: UIView {
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
         configureMenu()
+        configureToast()
         registerForAppLifecycle()
     }
 
@@ -227,6 +239,7 @@ private final class TapeCanvasUIView: UIView {
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
         configureMenu()
+        configureToast()
         registerForAppLifecycle()
     }
 
@@ -588,6 +601,14 @@ private final class TapeCanvasUIView: UIView {
         colorMenuBlurView.layer.masksToBounds = true
         colorMenuTintOverlay.layer.cornerRadius = colorMenuView.layer.cornerRadius
         colorMenuTintOverlay.layer.masksToBounds = true
+
+        let toastWidth = min(bounds.width - 32, 220)
+        toastLabel.frame = CGRect(
+            x: (bounds.width - toastWidth) / 2,
+            y: bounds.height - 96,
+            width: toastWidth,
+            height: 36
+        )
     }
 
     private func drawNoise(in context: CGContext, rect: CGRect) {
@@ -813,7 +834,21 @@ private final class TapeCanvasUIView: UIView {
         guard !isProUser else { return }
         Task { [weak self] in
             guard let self else { return }
-            _ = await onPurchasePro?()
+            let outcome = await onPurchasePro?()
+            switch outcome {
+            case .success:
+                showToast(text: "Pro activated")
+            case .cancelled:
+                showToast(text: "Purchase cancelled")
+            case .pending:
+                showToast(text: "Purchase pending")
+            case .productNotFound:
+                showToast(text: "Product not available")
+            case .failed:
+                showToast(text: "Purchase failed")
+            case .none:
+                break
+            }
             updateProButtonAppearance()
             hideMenuAfterSelection()
         }
@@ -830,8 +865,13 @@ private final class TapeCanvasUIView: UIView {
     }
 
     @objc private func handleSettingsTap() {
-        // Placeholder for future settings UI.
-        hideMenuAfterSelection()
+        Task { [weak self] in
+            guard let self else { return }
+            showToast(text: "Restoring…")
+            await onRestorePurchases?()
+            showToast(text: isProUser ? "Restored" : "Nothing to restore")
+            hideMenuAfterSelection()
+        }
     }
 
     @objc private func handleSparklesTap() {
@@ -869,7 +909,9 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func updateProButtonAppearance() {
-        proButton.tintColor = isProUser ? UIColor.systemGreen : UIColor.black.withAlphaComponent(0.7)
+        proButton.tintColor = isProUser
+            ? UIColor(red: 0.93, green: 0.74, blue: 0.2, alpha: 1.0)
+            : graphiteColor
     }
 
     private func configureTapButton(
@@ -927,6 +969,31 @@ private final class TapeCanvasUIView: UIView {
 
     private func hideMenuAfterSelection() {
         hideMenu(animated: true)
+    }
+
+    private func configureToast() {
+        toastLabel.textAlignment = .center
+        toastLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        toastLabel.textColor = UIColor(white: 0.1, alpha: 0.9)
+        toastLabel.backgroundColor = UIColor(white: 1.0, alpha: 0.9)
+        toastLabel.layer.cornerRadius = 10
+        toastLabel.layer.masksToBounds = true
+        toastLabel.alpha = 0
+        addSubview(toastLabel)
+    }
+
+    private func showToast(text: String) {
+        toastTimer?.invalidate()
+        toastLabel.text = text
+        bringSubviewToFront(toastLabel)
+        UIView.animate(withDuration: 0.15) {
+            self.toastLabel.alpha = 1
+        }
+        toastTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
+            UIView.animate(withDuration: 0.2) {
+                self?.toastLabel.alpha = 0
+            }
+        }
     }
 
     private func showMenu(animated: Bool) {
