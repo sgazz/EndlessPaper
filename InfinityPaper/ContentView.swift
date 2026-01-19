@@ -8,56 +8,22 @@
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var menuTrigger: Int = 0
 
     var body: some View {
         ZStack {
-            TapeCanvasView(
-                scenePhase: scenePhase,
-                menuTrigger: menuTrigger
-            )
+            TapeCanvasView()
             .ignoresSafeArea()
-
-            Image("InfinityPaper")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 132, height: 132)
-                .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
-                .contentShape(Rectangle())
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, 12)
-                .padding(.leading, 12)
-                .zIndex(10)
-                .highPriorityGesture(
-                    TapGesture().onEnded {
-                        menuTrigger += 1
-                    }
-                )
         }
     }
 }
 
 private struct TapeCanvasView: View {
-    let scenePhase: ScenePhase
-    let menuTrigger: Int
-
     var body: some View {
-        TapeCanvasRepresentable(
-            scenePhase: scenePhase,
-            menuTrigger: menuTrigger
-        )
+        TapeCanvasRepresentable()
     }
 }
 
 private struct TapeCanvasRepresentable: UIViewRepresentable {
-    let scenePhase: ScenePhase
-    let menuTrigger: Int
-
-    final class Coordinator {
-        var lastMenuTrigger: Int = 0
-    }
-
     func makeUIView(context: Context) -> TapeCanvasUIView {
         let view = TapeCanvasUIView()
         view.backgroundColor = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
@@ -65,17 +31,7 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TapeCanvasUIView, context: Context) {
-        if scenePhase == .background {
-            uiView.persistSessionIfNeeded()
-        }
-        if context.coordinator.lastMenuTrigger != menuTrigger {
-            context.coordinator.lastMenuTrigger = menuTrigger
-            uiView.showMenuAtCenter()
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+        // no-op
     }
 }
 
@@ -151,6 +107,7 @@ private final class TapeCanvasUIView: UIView {
     private var segmentWidth: CGFloat = 1
     private let toastLabel = UILabel()
     private var toastTimer: Timer?
+    private let menuTriggerButton = UIButton(type: .custom)
     private lazy var radialMenu = RadialMenuController(
         host: self,
         graphiteColor: graphiteColor,
@@ -495,6 +452,13 @@ private final class TapeCanvasUIView: UIView {
         segmentWidth = max(1, bounds.width * 1.5)
         updateSegmentsIfNeeded()
         radialMenu.layout(in: bounds)
+        let triggerSize: CGFloat = 132
+        menuTriggerButton.frame = CGRect(
+            x: safeAreaInsets.left + 12,
+            y: safeAreaInsets.top + 12,
+            width: triggerSize,
+            height: triggerSize
+        )
         let toastWidth = min(bounds.width - 32, 220)
         toastLabel.frame = CGRect(
             x: (bounds.width - toastWidth) / 2,
@@ -659,6 +623,7 @@ private final class TapeCanvasUIView: UIView {
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
+        configureMenuTriggerButton()
         _ = radialMenu
         configureToast()
         registerForAppLifecycle()
@@ -674,6 +639,27 @@ private final class TapeCanvasUIView: UIView {
         default:
             baseLineWidth = 2.2
         }
+    }
+
+    private func configureMenuTriggerButton() {
+        menuTriggerButton.backgroundColor = .clear
+        menuTriggerButton.layer.shadowColor = UIColor.black.cgColor
+        menuTriggerButton.layer.shadowOpacity = 0.18
+        menuTriggerButton.layer.shadowRadius = 8
+        menuTriggerButton.layer.shadowOffset = CGSize(width: 0, height: 3)
+        if let image = UIImage(named: "InfinityPaper") {
+            menuTriggerButton.setImage(image, for: .normal)
+            menuTriggerButton.imageView?.contentMode = .scaleAspectFit
+        } else {
+            menuTriggerButton.setTitle("∞", for: .normal)
+            menuTriggerButton.setTitleColor(UIColor.black.withAlphaComponent(0.8), for: .normal)
+            menuTriggerButton.titleLabel?.font = UIFont.systemFont(ofSize: 36, weight: .medium)
+        }
+        menuTriggerButton.accessibilityLabel = "Open radial menu"
+        menuTriggerButton.addAction(UIAction { [weak self] _ in
+            self?.showMenuAtCenter()
+        }, for: .touchUpInside)
+        addSubview(menuTriggerButton)
     }
 }
 
