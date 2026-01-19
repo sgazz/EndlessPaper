@@ -108,6 +108,8 @@ private final class TapeCanvasUIView: UIView {
     private let toastLabel = UILabel()
     private var toastTimer: Timer?
     private let menuTriggerButton = UIButton(type: .custom)
+    private let menuTriggerKeyX = "menuTrigger.center.x"
+    private let menuTriggerKeyY = "menuTrigger.center.y"
     private lazy var radialMenu = RadialMenuController(
         host: self,
         graphiteColor: graphiteColor,
@@ -130,6 +132,9 @@ private final class TapeCanvasUIView: UIView {
         let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         recognizer.cancelsTouchesInView = false
         return recognizer
+    }()
+    private lazy var menuTriggerPan: UIPanGestureRecognizer = {
+        UIPanGestureRecognizer(target: self, action: #selector(handleMenuTriggerPan(_:)))
     }()
 
     override init(frame: CGRect) {
@@ -453,12 +458,12 @@ private final class TapeCanvasUIView: UIView {
         updateSegmentsIfNeeded()
         radialMenu.layout(in: bounds)
         let triggerSize: CGFloat = 132
-        menuTriggerButton.frame = CGRect(
-            x: safeAreaInsets.left + 12,
-            y: safeAreaInsets.top + 12,
-            width: triggerSize,
-            height: triggerSize
+        let defaultCenter = CGPoint(
+            x: safeAreaInsets.left + 12 + triggerSize / 2,
+            y: safeAreaInsets.top + 12 + triggerSize / 2
         )
+        menuTriggerButton.frame.size = CGSize(width: triggerSize, height: triggerSize)
+        menuTriggerButton.center = clampMenuTrigger(point: loadMenuTriggerPosition() ?? defaultCenter)
         let toastWidth = min(bounds.width - 32, 220)
         toastLabel.frame = CGRect(
             x: (bounds.width - toastWidth) / 2,
@@ -541,12 +546,16 @@ private final class TapeCanvasUIView: UIView {
 
 
     func showMenuAtCenter() {
-        radialMenu.showMenuAtCenter()
+        menuTriggerButton.isHidden = true
+        radialMenu.showMenu(at: menuTriggerButton.center)
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
         let location = recognizer.location(in: self)
         radialMenu.handleTap(at: location)
+        if !radialMenu.isMenuVisible {
+            menuTriggerButton.isHidden = false
+        }
     }
 
     @objc private func handleSparklesTap() {
@@ -641,6 +650,34 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
+    private func clampMenuTrigger(point: CGPoint) -> CGPoint {
+        let size: CGFloat = 132
+        let half = size / 2
+        let minX = safeAreaInsets.left + half + 8
+        let maxX = bounds.width - safeAreaInsets.right - half - 8
+        let minY = safeAreaInsets.top + half + 8
+        let maxY = bounds.height - safeAreaInsets.bottom - half - 8
+        return CGPoint(
+            x: min(max(point.x, minX), maxX),
+            y: min(max(point.y, minY), maxY)
+        )
+    }
+
+    private func loadMenuTriggerPosition() -> CGPoint? {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: menuTriggerKeyX) != nil,
+              defaults.object(forKey: menuTriggerKeyY) != nil else { return nil }
+        let x = defaults.double(forKey: menuTriggerKeyX)
+        let y = defaults.double(forKey: menuTriggerKeyY)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func saveMenuTriggerPosition() {
+        let defaults = UserDefaults.standard
+        defaults.set(menuTriggerButton.center.x, forKey: menuTriggerKeyX)
+        defaults.set(menuTriggerButton.center.y, forKey: menuTriggerKeyY)
+    }
+
     private func configureMenuTriggerButton() {
         menuTriggerButton.backgroundColor = UIColor.white.withAlphaComponent(0.08)
         menuTriggerButton.layer.cornerRadius = 22
@@ -661,7 +698,18 @@ private final class TapeCanvasUIView: UIView {
         menuTriggerButton.addAction(UIAction { [weak self] _ in
             self?.showMenuAtCenter()
         }, for: .touchUpInside)
+        menuTriggerButton.addGestureRecognizer(menuTriggerPan)
+        menuTriggerButton.isUserInteractionEnabled = true
         addSubview(menuTriggerButton)
+    }
+
+    @objc private func handleMenuTriggerPan(_ recognizer: UIPanGestureRecognizer) {
+        let translation = recognizer.translation(in: self)
+        let current = menuTriggerButton.center
+        let next = CGPoint(x: current.x + translation.x, y: current.y + translation.y)
+        menuTriggerButton.center = clampMenuTrigger(point: next)
+        saveMenuTriggerPosition()
+        recognizer.setTranslation(.zero, in: self)
     }
 }
 

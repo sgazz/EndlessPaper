@@ -21,8 +21,13 @@ final class RadialMenuController {
     private let settingsButton = UIButton(type: .system)
     private let sparklesButton = UIButton(type: .system)
     private var colorButtons: [UIButton] = []
+    private let menuCenterKeyX = "radialMenu.center.x"
+    private let menuCenterKeyY = "radialMenu.center.y"
 
     private(set) var menuCenter: CGPoint = .zero
+    private lazy var menuPan: UIPanGestureRecognizer = {
+        UIPanGestureRecognizer(target: self, action: #selector(handleMenuPan(_:)))
+    }()
 
     init(
         host: UIView,
@@ -47,6 +52,7 @@ final class RadialMenuController {
         self.onSettings = onSettings
         self.onSparkles = onSparkles
 
+        loadMenuCenter()
         configureMenu()
         configureColorMenu()
     }
@@ -57,11 +63,23 @@ final class RadialMenuController {
 
     func showMenuAtCenter() {
         menuCenter = CGPoint(x: host.bounds.midX, y: host.bounds.midY)
+        menuCenter = clamp(point: menuCenter, in: host.bounds)
+        saveMenuCenter()
+        colorMenuView.isHidden = true
+        showMenu(animated: true)
+    }
+
+    func showMenu(at point: CGPoint) {
+        menuCenter = clamp(point: point, in: host.bounds)
+        saveMenuCenter()
         colorMenuView.isHidden = true
         showMenu(animated: true)
     }
 
     func layout(in bounds: CGRect) {
+        if menuCenter != .zero {
+            menuCenter = clamp(point: menuCenter, in: bounds)
+        }
         let size: CGFloat = 192
         layoutMenuSlots(
             view: menuView,
@@ -142,6 +160,7 @@ final class RadialMenuController {
             menuView.addSubview($0)
         }
 
+        menuView.addGestureRecognizer(menuPan)
         updateEraserAppearance()
         host.addSubview(menuView)
     }
@@ -175,6 +194,7 @@ final class RadialMenuController {
             $0.frame.size = CGSize(width: 72, height: 72)
         }
 
+        colorMenuView.addGestureRecognizer(menuPan)
         host.addSubview(colorMenuView)
     }
 
@@ -218,6 +238,15 @@ final class RadialMenuController {
         eraserButton.tintColor = getIsEraser()
             ? UIColor.systemBlue
             : UIColor.black.withAlphaComponent(0.7)
+    }
+
+    @objc private func handleMenuPan(_ recognizer: UIPanGestureRecognizer) {
+        let translation = recognizer.translation(in: host)
+        let next = CGPoint(x: menuCenter.x + translation.x, y: menuCenter.y + translation.y)
+        menuCenter = clamp(point: next, in: host.bounds)
+        recognizer.setTranslation(.zero, in: host)
+        saveMenuCenter()
+        layout(in: host.bounds)
     }
 
     private func configureTapButton(
@@ -355,5 +384,27 @@ final class RadialMenuController {
             colorMenuView.alpha = 1
             colorMenuView.transform = .identity
         }
+    }
+
+    private func clamp(point: CGPoint, in bounds: CGRect) -> CGPoint {
+        let margin: CGFloat = 64
+        let x = min(max(point.x, bounds.minX + margin), bounds.maxX - margin)
+        let y = min(max(point.y, bounds.minY + margin), bounds.maxY - margin)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func loadMenuCenter() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: menuCenterKeyX) != nil,
+              defaults.object(forKey: menuCenterKeyY) != nil else { return }
+        let x = defaults.double(forKey: menuCenterKeyX)
+        let y = defaults.double(forKey: menuCenterKeyY)
+        menuCenter = CGPoint(x: x, y: y)
+    }
+
+    private func saveMenuCenter() {
+        let defaults = UserDefaults.standard
+        defaults.set(menuCenter.x, forKey: menuCenterKeyX)
+        defaults.set(menuCenter.y, forKey: menuCenterKeyY)
     }
 }
