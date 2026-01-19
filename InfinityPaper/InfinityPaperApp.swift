@@ -47,7 +47,7 @@ struct InfinityPaperApp: App {
 }
 
 private struct SplashView: View {
-    private let splashBackground = Color(.sRGB, red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, opacity: 1.0)
+    private let splashBackground = Color(.sRGB, red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, opacity: 1.0)
     @State private var logoOpacity = 0.0
 
     var body: some View {

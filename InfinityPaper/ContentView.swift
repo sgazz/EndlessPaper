@@ -26,7 +26,7 @@ private struct TapeCanvasView: View {
 private struct TapeCanvasRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> TapeCanvasUIView {
         let view = TapeCanvasUIView()
-        view.backgroundColor = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
+        view.backgroundColor = UIColor(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, alpha: 1.0)
         return view
     }
 
@@ -88,7 +88,7 @@ private final class TapeCanvasUIView: UIView {
     private var decelVelocity: CGFloat = 0
     private let decelRate: CGFloat = 0.92
     private let velocityStopThreshold: CGFloat = 4
-    private let backgroundColorTone = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
+    private let backgroundColorTone = UIColor(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, alpha: 1.0)
     private var baseStrokeColor: UIColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
     private let graphiteColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
     private var baseLineWidth: CGFloat = 2.2
@@ -642,11 +642,13 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func configureMenuTriggerButton() {
-        menuTriggerButton.backgroundColor = .clear
-        menuTriggerButton.layer.shadowColor = UIColor.black.cgColor
-        menuTriggerButton.layer.shadowOpacity = 0.18
-        menuTriggerButton.layer.shadowRadius = 8
-        menuTriggerButton.layer.shadowOffset = CGSize(width: 0, height: 3)
+        menuTriggerButton.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+        menuTriggerButton.layer.cornerRadius = 22
+        menuTriggerButton.layer.shadowColor = nil
+        menuTriggerButton.layer.shadowOpacity = 0
+        menuTriggerButton.layer.shadowRadius = 0
+        menuTriggerButton.layer.shadowOffset = .zero
+        menuTriggerButton.layer.masksToBounds = true
         if let image = UIImage(named: "InfinityPaper") {
             menuTriggerButton.setImage(image, for: .normal)
             menuTriggerButton.imageView?.contentMode = .scaleAspectFit
