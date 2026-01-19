@@ -9,21 +9,13 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @EnvironmentObject private var proStatus: ProStatus
     @State private var menuTrigger: Int = 0
 
     var body: some View {
         ZStack {
             TapeCanvasView(
-                isProUser: proStatus.isPro,
                 scenePhase: scenePhase,
-                menuTrigger: menuTrigger,
-                purchasePro: {
-                    await proStatus.purchasePro()
-                },
-                restorePurchases: {
-                    await proStatus.restorePurchases()
-                }
+                menuTrigger: menuTrigger
             )
             .ignoresSafeArea()
 
@@ -47,30 +39,21 @@ struct ContentView: View {
 }
 
 private struct TapeCanvasView: View {
-    let isProUser: Bool
     let scenePhase: ScenePhase
     let menuTrigger: Int
-    let purchasePro: () async -> PurchaseOutcome
-    let restorePurchases: () async -> Void
 
     var body: some View {
         TapeCanvasRepresentable(
-            isProUser: isProUser,
             scenePhase: scenePhase,
-            menuTrigger: menuTrigger,
-            purchasePro: purchasePro,
-            restorePurchases: restorePurchases
+            menuTrigger: menuTrigger
         )
             .ignoresSafeArea()
     }
 }
 
 private struct TapeCanvasRepresentable: UIViewRepresentable {
-    let isProUser: Bool
     let scenePhase: ScenePhase
     let menuTrigger: Int
-    let purchasePro: () async -> PurchaseOutcome
-    let restorePurchases: () async -> Void
 
     final class Coordinator {
         var lastMenuTrigger: Int = 0
@@ -79,16 +62,10 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> TapeCanvasUIView {
         let view = TapeCanvasUIView()
         view.backgroundColor = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
-        view.isProUser = isProUser
-        view.onPurchasePro = purchasePro
-        view.onRestorePurchases = restorePurchases
         return view
     }
 
     func updateUIView(_ uiView: TapeCanvasUIView, context: Context) {
-        uiView.isProUser = isProUser
-        uiView.onPurchasePro = purchasePro
-        uiView.onRestorePurchases = restorePurchases
         if scenePhase == .background {
             uiView.persistSessionIfNeeded()
         }
@@ -159,27 +136,14 @@ private final class TapeCanvasUIView: UIView {
     private let backgroundColorTone = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
     private var baseStrokeColor: UIColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
     private let graphiteColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
-    private var colorPalette: [UIColor] = [
-        UIColor(red: 0.05, green: 0.9, blue: 1.0, alpha: 0.95),  // neon cyan
-        UIColor(red: 0.96, green: 0.2, blue: 0.84, alpha: 0.95),  // neon magenta
-        UIColor(red: 0.2, green: 1.0, blue: 0.45, alpha: 0.95),   // neon green
-        UIColor(red: 0.99, green: 0.78, blue: 0.1, alpha: 0.95),  // neon yellow
-        UIColor(red: 0.55, green: 0.35, blue: 1.0, alpha: 0.95)   // neon purple
-    ]
-    private var colorIndex: Int = 0
     private var baseLineWidth: CGFloat = 2.2
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
     private let menuView = UIView()
-    private let menuBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-    private let menuTintOverlay = UIView()
     private let colorMenuView = UIView()
-    private let colorMenuBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-    private let colorMenuTintOverlay = UIView()
     private let colorButton = UIButton(type: .system)
     private let widthButton = UIButton(type: .system)
     private let eraserButton = UIButton(type: .system)
-    private let proButton = UIButton(type: .system)
     private let exportButton = UIButton(type: .system)
     private let settingsButton = UIButton(type: .system)
     private let sparklesButton = UIButton(type: .system)
@@ -193,25 +157,11 @@ private final class TapeCanvasUIView: UIView {
         UIColor(red: 0.22, green: 1.0, blue: 0.85, alpha: 0.95)    // neon mint
     ]
     private var colorButtons: [UIButton] = []
-    private var didLoadSession: Bool = false
     private var telemetry = Telemetry()
-    private let freeHistoryEnabled = true
-    private let freeHistoryFileName = "session_free.json"
-    private let proHistoryFileName = "session.json"
-    private let freeHistoryMaxAgeHours: Double = 24
+    private let sessionFileName = "session.json"
     private var segmentWidth: CGFloat = 1
     private let toastLabel = UILabel()
     private var toastTimer: Timer?
-    var isProUser: Bool = false {
-        didSet {
-            if !didLoadSession {
-                loadSession()
-            }
-            updateProButtonAppearance()
-        }
-    }
-    var onPurchasePro: (() async -> PurchaseOutcome)?
-    var onRestorePurchases: (() async -> Void)?
     private lazy var panRecognizer: UIPanGestureRecognizer = {
         let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         recognizer.minimumNumberOfTouches = 2
@@ -226,22 +176,12 @@ private final class TapeCanvasUIView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isMultipleTouchEnabled = true
-        addGestureRecognizer(panRecognizer)
-        addGestureRecognizer(tapRecognizer)
-        configureMenu()
-        configureToast()
-        registerForAppLifecycle()
+        configureCommon()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        isMultipleTouchEnabled = true
-        addGestureRecognizer(panRecognizer)
-        addGestureRecognizer(tapRecognizer)
-        configureMenu()
-        configureToast()
-        registerForAppLifecycle()
+        configureCommon()
     }
 
     deinit {
@@ -493,13 +433,7 @@ private final class TapeCanvasUIView: UIView {
     }
 
     func persistSessionIfNeeded() {
-        if isProUser {
-            saveSession()
-        } else if freeHistoryEnabled {
-            saveSession()
-        } else {
-            clearSavedSession(forPro: false)
-        }
+        saveSession()
     }
 
     private func saveSession() {
@@ -522,24 +456,16 @@ private final class TapeCanvasUIView: UIView {
         )
         do {
             let data = try JSONEncoder().encode(storedSession)
-            try data.write(to: sessionURL(forPro: isProUser), options: Data.WritingOptions.atomic)
+            try data.write(to: sessionURL(), options: Data.WritingOptions.atomic)
         } catch {
             // Best-effort persistence; ignore errors in MVP.
         }
     }
 
     private func loadSession() {
-        didLoadSession = true
         do {
-            let data = try Data(contentsOf: sessionURL(forPro: isProUser))
+            let data = try Data(contentsOf: sessionURL())
             let storedSession = try JSONDecoder().decode(StoredSession.self, from: data)
-            if !isProUser && freeHistoryEnabled {
-                let ageHours = (Date().timeIntervalSince1970 - storedSession.savedAt) / 3600
-                if ageHours > freeHistoryMaxAgeHours {
-                    clearSavedSession(forPro: false)
-                    return
-                }
-            }
             segments = Dictionary(uniqueKeysWithValues: storedSession.segments.map { stored in
                 let strokes = stored.strokes.map { stroke in
                     Stroke(
@@ -558,19 +484,9 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
-    private func clearSavedSession(forPro: Bool) {
-        try? FileManager.default.removeItem(at: sessionURL(forPro: forPro))
-    }
-
-    private func sessionURL(forPro: Bool) -> URL {
-        let directory: URL
-        if forPro {
-            directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        } else {
-            directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        }
-        let fileName = forPro ? proHistoryFileName : freeHistoryFileName
-        return directory.appendingPathComponent(fileName)
+    private func sessionURL() -> URL {
+        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return directory.appendingPathComponent(sessionFileName)
     }
 
     override func layoutSubviews() {
@@ -582,7 +498,7 @@ private final class TapeCanvasUIView: UIView {
             view: menuView,
             size: size,
             radius: 52,
-            slots: [colorButton, widthButton, settingsButton, proButton, exportButton, sparklesButton]
+            slots: [colorButton, widthButton, settingsButton, exportButton, sparklesButton]
         )
         layoutMenuSlots(
             view: colorMenuView,
@@ -590,19 +506,6 @@ private final class TapeCanvasUIView: UIView {
             radius: 52,
             slots: colorButtons.map { Optional($0) }
         )
-        menuBlurView.frame = menuView.bounds
-        menuTintOverlay.frame = menuView.bounds
-        menuBlurView.layer.cornerRadius = menuView.layer.cornerRadius
-        menuBlurView.layer.masksToBounds = true
-        menuTintOverlay.layer.cornerRadius = menuView.layer.cornerRadius
-        menuTintOverlay.layer.masksToBounds = true
-        colorMenuBlurView.frame = colorMenuView.bounds
-        colorMenuTintOverlay.frame = colorMenuView.bounds
-        colorMenuBlurView.layer.cornerRadius = colorMenuView.layer.cornerRadius
-        colorMenuBlurView.layer.masksToBounds = true
-        colorMenuTintOverlay.layer.cornerRadius = colorMenuView.layer.cornerRadius
-        colorMenuTintOverlay.layer.masksToBounds = true
-
         let toastWidth = min(bounds.width - 32, 220)
         toastLabel.frame = CGRect(
             x: (bounds.width - toastWidth) / 2,
@@ -666,9 +569,6 @@ private final class TapeCanvasUIView: UIView {
         menuView.isHidden = true
         menuView.isUserInteractionEnabled = true
 
-        menuBlurView.isHidden = true
-        menuTintOverlay.isHidden = true
-
         configureTapButton(
             colorButton,
             imageSystemName: "circle.fill",
@@ -690,12 +590,6 @@ private final class TapeCanvasUIView: UIView {
             action: { [weak self] in self?.handleEraserTap() }
         )
         configureTapButton(
-            proButton,
-            imageSystemName: "crown",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.handleProTap() }
-        )
-        configureTapButton(
             exportButton,
             imageSystemName: "square.and.arrow.up",
             tintColor: graphiteColor,
@@ -714,13 +608,12 @@ private final class TapeCanvasUIView: UIView {
             action: { [weak self] in self?.handleSparklesTap() }
         )
 
-        [colorButton, widthButton, settingsButton, proButton, exportButton, sparklesButton].forEach {
+        [colorButton, widthButton, settingsButton, exportButton, sparklesButton].forEach {
             $0.backgroundColor = .clear
             $0.layer.cornerRadius = 0
             $0.frame.size = CGSize(width: 72, height: 72)
             menuView.addSubview($0)
         }
-        updateProButtonAppearance()
 
         addSubview(menuView)
         configureColorMenu()
@@ -737,9 +630,6 @@ private final class TapeCanvasUIView: UIView {
         colorMenuView.layer.borderWidth = 0
         colorMenuView.isHidden = true
         colorMenuView.isUserInteractionEnabled = true
-
-        colorMenuBlurView.isHidden = true
-        colorMenuTintOverlay.isHidden = true
 
         colorButtons = colorSubPalette.enumerated().map { index, color in
             let button = UIButton(type: .system)
@@ -833,48 +723,14 @@ private final class TapeCanvasUIView: UIView {
         hideMenuAfterSelection()
     }
 
-    @objc private func handleProTap() {
-        guard !isProUser else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            let outcome = await onPurchasePro?()
-            switch outcome {
-            case .success:
-                showToast(text: "Pro activated")
-            case .cancelled:
-                showToast(text: "Purchase cancelled")
-            case .pending:
-                showToast(text: "Purchase pending")
-            case .productNotFound:
-                showToast(text: "Product not available")
-            case .failed:
-                showToast(text: "Purchase failed")
-            case .none:
-                break
-            }
-            updateProButtonAppearance()
-            hideMenuAfterSelection()
-        }
-    }
-
     @objc private func handleExportTap() {
-        guard isProUser else {
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-            hideMenuAfterSelection()
-            return
-        }
         exportVisiblePDF()
         hideMenuAfterSelection()
     }
 
     @objc private func handleSettingsTap() {
-        Task { [weak self] in
-            guard let self else { return }
-            showToast(text: "Restoring…")
-            await onRestorePurchases?()
-            showToast(text: isProUser ? "Restored" : "Nothing to restore")
-            hideMenuAfterSelection()
-        }
+        showToast(text: "Settings")
+        hideMenuAfterSelection()
     }
 
     @objc private func handleSparklesTap() {
@@ -909,12 +765,6 @@ private final class TapeCanvasUIView: UIView {
         activity.popoverPresentationController?.sourceView = self
         activity.popoverPresentationController?.sourceRect = CGRect(x: menuCenter.x, y: menuCenter.y, width: 1, height: 1)
         controller.present(activity, animated: true)
-    }
-
-    private func updateProButtonAppearance() {
-        proButton.tintColor = isProUser
-            ? UIColor(red: 0.93, green: 0.74, blue: 0.2, alpha: 1.0)
-            : graphiteColor
     }
 
     private func configureTapButton(
@@ -1088,6 +938,16 @@ private final class TapeCanvasUIView: UIView {
             responder = next
         }
         return nil
+    }
+
+    private func configureCommon() {
+        isMultipleTouchEnabled = true
+        addGestureRecognizer(panRecognizer)
+        addGestureRecognizer(tapRecognizer)
+        configureMenu()
+        configureToast()
+        registerForAppLifecycle()
+        loadSession()
     }
 }
 

@@ -9,7 +9,6 @@ import SwiftUI
 
 @main
 struct InfinityPaperApp: App {
-    @StateObject private var proStatus = ProStatus()
     @State private var showSplash = true
 
     var body: some Scene {
@@ -19,7 +18,6 @@ struct InfinityPaperApp: App {
                     SplashView()
                 } else {
                     ContentView()
-                        .environmentObject(proStatus)
                 }
             }
             .onAppear {
