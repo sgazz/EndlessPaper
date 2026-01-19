@@ -3,7 +3,7 @@ import UIKit
 final class RadialMenuController {
     private unowned let host: UIView
     private let graphiteColor: UIColor
-    private let colorSubPalette: [UIColor]
+    private var colorSubPalette: [UIColor]
     private let getIsEraser: () -> Bool
     private let setIsEraser: (Bool) -> Void
     private let setBaseStrokeColor: (UIColor) -> Void
@@ -11,6 +11,7 @@ final class RadialMenuController {
     private let onExport: () -> Void
     private let onSettings: () -> Void
     private let onSparkles: () -> Void
+    private let onPaletteIndexChanged: (Int) -> Void
 
     private let menuView = UIView()
     private let colorMenuView = UIView()
@@ -23,6 +24,11 @@ final class RadialMenuController {
     private var colorButtons: [UIButton] = []
     private let menuCenterKeyX = "radialMenu.center.x"
     private let menuCenterKeyY = "radialMenu.center.y"
+    private let bounceCountKey = "radialMenu.bounce.count"
+    private let paletteIndexKey = "radialMenu.palette.index"
+    private let bounceMilestone = 1000
+    private var bounceCount: Int = 0
+    private var paletteIndex: Int = 0
     private var displayLink: CADisplayLink?
     private var inertiaVelocity: CGPoint = .zero
     private let inertiaDecelRate: CGFloat = 0.94
@@ -44,7 +50,8 @@ final class RadialMenuController {
         cycleLineWidth: @escaping () -> Void,
         onExport: @escaping () -> Void,
         onSettings: @escaping () -> Void,
-        onSparkles: @escaping () -> Void
+        onSparkles: @escaping () -> Void,
+        onPaletteIndexChanged: @escaping (Int) -> Void
     ) {
         self.host = host
         self.graphiteColor = graphiteColor
@@ -56,10 +63,12 @@ final class RadialMenuController {
         self.onExport = onExport
         self.onSettings = onSettings
         self.onSparkles = onSparkles
+        self.onPaletteIndexChanged = onPaletteIndexChanged
 
         loadMenuCenter()
         configureMenu()
         configureColorMenu()
+        loadBounceProgress()
     }
 
     var isMenuVisible: Bool {
@@ -104,6 +113,18 @@ final class RadialMenuController {
         guard isMenuVisible else { return }
         if !menuView.frame.contains(location) && !colorMenuView.frame.contains(location) {
             hideMenuAfterSelection()
+        }
+    }
+
+    func updateColorPalette(_ colors: [UIColor]) {
+        guard colors.count == colorButtons.count else { return }
+        colorSubPalette = colors
+        for (index, color) in colors.enumerated() {
+            let button = colorButtons[index]
+            button.tintColor = color
+            if let imageView = button.imageView {
+                imageView.tintColor = color
+            }
         }
     }
 
@@ -432,16 +453,20 @@ final class RadialMenuController {
         if next.x < minX {
             next.x = minX
             inertiaVelocity.x = abs(inertiaVelocity.x) * bounceFactor
+            registerBounceIfNeeded()
         } else if next.x > maxX {
             next.x = maxX
             inertiaVelocity.x = -abs(inertiaVelocity.x) * bounceFactor
+            registerBounceIfNeeded()
         }
         if next.y < minY {
             next.y = minY
             inertiaVelocity.y = abs(inertiaVelocity.y) * bounceFactor
+            registerBounceIfNeeded()
         } else if next.y > maxY {
             next.y = maxY
             inertiaVelocity.y = -abs(inertiaVelocity.y) * bounceFactor
+            registerBounceIfNeeded()
         }
 
         inertiaVelocity.x *= pow(inertiaDecelRate, dt * 60)
@@ -475,5 +500,30 @@ final class RadialMenuController {
         let defaults = UserDefaults.standard
         defaults.set(menuCenter.x, forKey: menuCenterKeyX)
         defaults.set(menuCenter.y, forKey: menuCenterKeyY)
+    }
+
+    private func loadBounceProgress() {
+        let defaults = UserDefaults.standard
+        bounceCount = defaults.integer(forKey: bounceCountKey)
+        paletteIndex = defaults.integer(forKey: paletteIndexKey)
+        onPaletteIndexChanged(paletteIndex)
+    }
+
+    private func saveBounceProgress() {
+        let defaults = UserDefaults.standard
+        defaults.set(bounceCount, forKey: bounceCountKey)
+        defaults.set(paletteIndex, forKey: paletteIndexKey)
+    }
+
+    private func registerBounceIfNeeded() {
+        guard !colorMenuView.isHidden else { return }
+        bounceCount += 1
+        if bounceCount % bounceMilestone == 0 {
+            paletteIndex = (paletteIndex + 1) % 2
+            onPaletteIndexChanged(paletteIndex)
+            saveBounceProgress()
+        } else if bounceCount % 50 == 0 {
+            saveBounceProgress()
+        }
     }
 }

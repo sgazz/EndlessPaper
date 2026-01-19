@@ -94,7 +94,7 @@ private final class TapeCanvasUIView: UIView {
     private var baseLineWidth: CGFloat = 2.2
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
-    private let colorSubPalette: [UIColor] = [
+    private let primaryColorPalette: [UIColor] = [
         UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9),   // graphite
         UIColor(red: 0.12, green: 0.9, blue: 0.98, alpha: 0.95),   // neon cyan 2
         UIColor(red: 1.0, green: 0.35, blue: 0.78, alpha: 0.95),   // neon pink
@@ -102,6 +102,15 @@ private final class TapeCanvasUIView: UIView {
         UIColor(red: 0.98, green: 0.42, blue: 0.12, alpha: 0.95),  // neon orange
         UIColor(red: 0.22, green: 1.0, blue: 0.85, alpha: 0.95)    // neon mint
     ]
+    private let achievementColorPalette: [UIColor] = [
+        UIColor(red: 0.65, green: 0.77, blue: 0.95, alpha: 0.95),  // pastel blue
+        UIColor(red: 0.96, green: 0.73, blue: 0.82, alpha: 0.95),  // pastel pink
+        UIColor(red: 0.96, green: 0.85, blue: 0.66, alpha: 0.95),  // pastel peach
+        UIColor(red: 0.73, green: 0.9, blue: 0.77, alpha: 0.95),   // pastel mint
+        UIColor(red: 0.84, green: 0.78, blue: 0.93, alpha: 0.95),  // pastel lavender
+        UIColor(red: 0.88, green: 0.92, blue: 0.98, alpha: 0.95)   // pastel ice
+    ]
+    private var lastPaletteIndex: Int?
     private var telemetry = Telemetry()
     private let sessionFileName = "session.json"
     private var segmentWidth: CGFloat = 1
@@ -113,14 +122,17 @@ private final class TapeCanvasUIView: UIView {
     private lazy var radialMenu = RadialMenuController(
         host: self,
         graphiteColor: graphiteColor,
-        colorSubPalette: colorSubPalette,
+        colorSubPalette: primaryColorPalette,
         getIsEraser: { [weak self] in self?.isEraser ?? false },
         setIsEraser: { [weak self] value in self?.isEraser = value },
         setBaseStrokeColor: { [weak self] color in self?.baseStrokeColor = color },
         cycleLineWidth: { [weak self] in self?.cycleLineWidth() },
         onExport: { [weak self] in self?.exportVisiblePDF() },
         onSettings: { [weak self] in self?.showToast(text: "Settings") },
-        onSparkles: { [weak self] in self?.handleSparklesTap() }
+        onSparkles: { [weak self] in self?.handleSparklesTap() },
+        onPaletteIndexChanged: { [weak self] index in
+            self?.applyPalette(index: index)
+        }
     )
     private lazy var panRecognizer: UIPanGestureRecognizer = {
         let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -648,6 +660,16 @@ private final class TapeCanvasUIView: UIView {
         default:
             baseLineWidth = 2.2
         }
+    }
+
+    private func applyPalette(index: Int) {
+        let palette = index == 0 ? primaryColorPalette : achievementColorPalette
+        radialMenu.updateColorPalette(palette)
+        if let lastPaletteIndex, lastPaletteIndex != index {
+            let message = index == 0 ? "Original colors restored" : "New colors unlocked"
+            showToast(text: message)
+        }
+        lastPaletteIndex = index
     }
 
     private func clampMenuTrigger(point: CGPoint) -> CGPoint {
