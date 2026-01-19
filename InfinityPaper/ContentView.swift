@@ -78,7 +78,7 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TapeCanvasUIView {
         let view = TapeCanvasUIView()
-        view.backgroundColor = UIColor(white: 0.98, alpha: 1.0)
+        view.backgroundColor = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
         view.isProUser = isProUser
         view.onPurchasePro = purchasePro
         view.onRestorePurchases = restorePurchases
@@ -156,7 +156,7 @@ private final class TapeCanvasUIView: UIView {
     private var decelVelocity: CGFloat = 0
     private let decelRate: CGFloat = 0.92
     private let velocityStopThreshold: CGFloat = 4
-    private let backgroundColorTone = UIColor(white: 0.98, alpha: 1.0)
+    private let backgroundColorTone = UIColor(red: 250.0 / 255.0, green: 247.0 / 255.0, blue: 243.0 / 255.0, alpha: 1.0)
     private var baseStrokeColor: UIColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
     private let graphiteColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
     private var colorPalette: [UIColor] = [
@@ -639,7 +639,7 @@ private final class TapeCanvasUIView: UIView {
     private func makeNoiseTile(size: CGFloat) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
         return renderer.image { ctx in
-            let base = UIColor(white: 1.0, alpha: 0.02)
+            let base = backgroundColorTone.withAlphaComponent(0.02)
             base.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
 
@@ -888,7 +888,7 @@ private final class TapeCanvasUIView: UIView {
         let data = renderer.pdfData { context in
             context.beginPage()
             let cgContext = context.cgContext
-            cgContext.setFillColor(UIColor.white.cgColor)
+            cgContext.setFillColor(backgroundColorTone.cgColor)
             cgContext.fill(pageBounds)
             cgContext.translateBy(x: -contentOffset.x, y: -contentOffset.y)
             drawStrokesForExport(in: cgContext)
@@ -1016,7 +1016,7 @@ private final class TapeCanvasUIView: UIView {
         toastLabel.textAlignment = .center
         toastLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         toastLabel.textColor = UIColor(white: 0.1, alpha: 0.9)
-        toastLabel.backgroundColor = UIColor(white: 1.0, alpha: 0.9)
+        toastLabel.backgroundColor = backgroundColorTone.withAlphaComponent(0.92)
         toastLabel.layer.cornerRadius = 10
         toastLabel.layer.masksToBounds = true
         toastLabel.alpha = 0
