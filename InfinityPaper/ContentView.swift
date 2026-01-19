@@ -31,6 +31,7 @@ struct ContentView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 132, height: 132)
+                .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
                 .contentShape(Rectangle())
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.top, 12)
@@ -674,12 +675,14 @@ private final class TapeCanvasUIView: UIView {
             tintColor: graphiteColor,
             action: { [weak self] in self?.showColorMenu() }
         )
+        colorButton.setImage(makeColorDotsIcon(), for: .normal)
         configureTapButton(
             widthButton,
             imageSystemName: "line.3.horizontal",
             tintColor: graphiteColor,
             action: { [weak self] in self?.handleWidthTap() }
         )
+        widthButton.setImage(makeLineWidthIcon(), for: .normal)
         configureTapButton(
             eraserButton,
             imageSystemName: "eraser",
@@ -931,6 +934,44 @@ private final class TapeCanvasUIView: UIView {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             action()
         }, for: .touchUpInside)
+    }
+
+    private func makeColorDotsIcon(size: CGFloat = 26) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+        return renderer.image { context in
+            let dotDiameter = size * 0.24
+            let spacing = size * 0.08
+            let totalWidth = dotDiameter * 3 + spacing * 2
+            let startX = (size - totalWidth) / 2
+            let y = (size - dotDiameter) / 2
+            let colors: [UIColor] = [.red, .green, .blue]
+            for (index, color) in colors.enumerated() {
+                let x = startX + CGFloat(index) * (dotDiameter + spacing)
+                let rect = CGRect(x: x, y: y, width: dotDiameter, height: dotDiameter)
+                context.cgContext.setFillColor(color.cgColor)
+                context.cgContext.fillEllipse(in: rect)
+            }
+        }.withRenderingMode(.alwaysOriginal)
+    }
+
+    private func makeLineWidthIcon(size: CGFloat = 26) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+        return renderer.image { context in
+            let startX = size * 0.18
+            let endX = size * 0.82
+            let centerY = size / 2
+            let offsets: [CGFloat] = [-size * 0.18, 0, size * 0.18]
+            let widths: [CGFloat] = [1.2, 2.4, 3.8]
+            context.cgContext.setStrokeColor(graphiteColor.cgColor)
+            context.cgContext.setLineCap(.round)
+            for (offset, width) in zip(offsets, widths) {
+                context.cgContext.setLineWidth(width)
+                context.cgContext.beginPath()
+                context.cgContext.move(to: CGPoint(x: startX, y: centerY + offset))
+                context.cgContext.addLine(to: CGPoint(x: endX, y: centerY + offset))
+                context.cgContext.strokePath()
+            }
+        }.withRenderingMode(.alwaysOriginal)
     }
 
     private func layoutMenuSlots(view: UIView, size: CGFloat, radius: CGFloat, slots: [UIButton?]) {
