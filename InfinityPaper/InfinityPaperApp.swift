@@ -10,18 +10,35 @@ import SwiftUI
 @main
 struct InfinityPaperApp: App {
     @State private var showSplash = true
+    @State private var mainOpacity = 0.0
+    @State private var splashOpacity = 1.0
+    @State private var didStartTransition = false
 
     var body: some Scene {
         WindowGroup {
             ZStack {
-                if showSplash {
-                    SplashView()
-                } else {
-                    ContentView()
-                }
+                ContentView()
+                    .opacity(mainOpacity)
+                    .allowsHitTesting(!showSplash)
+                SplashView()
+                    .opacity(splashOpacity)
+                    .allowsHitTesting(showSplash)
             }
             .onAppear {
+                guard !didStartTransition else { return }
+                didStartTransition = true
+                mainOpacity = 0
+                splashOpacity = 1
+                let overlapStart = 2.2
+                DispatchQueue.main.asyncAfter(deadline: .now() + overlapStart) {
+                    withAnimation(.easeInOut(duration: 0.8)) {
+                        mainOpacity = 1
+                    }
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        splashOpacity = 0
+                    }
                     showSplash = false
                 }
             }
