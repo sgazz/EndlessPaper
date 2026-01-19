@@ -47,7 +47,6 @@ private struct TapeCanvasView: View {
             scenePhase: scenePhase,
             menuTrigger: menuTrigger
         )
-            .ignoresSafeArea()
     }
 }
 
@@ -139,15 +138,6 @@ private final class TapeCanvasUIView: UIView {
     private var baseLineWidth: CGFloat = 2.2
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
-    private let menuView = UIView()
-    private let colorMenuView = UIView()
-    private let colorButton = UIButton(type: .system)
-    private let widthButton = UIButton(type: .system)
-    private let eraserButton = UIButton(type: .system)
-    private let exportButton = UIButton(type: .system)
-    private let settingsButton = UIButton(type: .system)
-    private let sparklesButton = UIButton(type: .system)
-    private var menuCenter: CGPoint = .zero
     private let colorSubPalette: [UIColor] = [
         UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9),   // graphite
         UIColor(red: 0.12, green: 0.9, blue: 0.98, alpha: 0.95),   // neon cyan 2
@@ -156,12 +146,23 @@ private final class TapeCanvasUIView: UIView {
         UIColor(red: 0.98, green: 0.42, blue: 0.12, alpha: 0.95),  // neon orange
         UIColor(red: 0.22, green: 1.0, blue: 0.85, alpha: 0.95)    // neon mint
     ]
-    private var colorButtons: [UIButton] = []
     private var telemetry = Telemetry()
     private let sessionFileName = "session.json"
     private var segmentWidth: CGFloat = 1
     private let toastLabel = UILabel()
     private var toastTimer: Timer?
+    private lazy var radialMenu = RadialMenuController(
+        host: self,
+        graphiteColor: graphiteColor,
+        colorSubPalette: colorSubPalette,
+        getIsEraser: { [weak self] in self?.isEraser ?? false },
+        setIsEraser: { [weak self] value in self?.isEraser = value },
+        setBaseStrokeColor: { [weak self] color in self?.baseStrokeColor = color },
+        cycleLineWidth: { [weak self] in self?.cycleLineWidth() },
+        onExport: { [weak self] in self?.exportVisiblePDF() },
+        onSettings: { [weak self] in self?.showToast(text: "Settings") },
+        onSparkles: { [weak self] in self?.handleSparklesTap() }
+    )
     private lazy var panRecognizer: UIPanGestureRecognizer = {
         let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         recognizer.minimumNumberOfTouches = 2
@@ -298,7 +299,7 @@ private final class TapeCanvasUIView: UIView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
-        if !menuView.isHidden { return }
+        if radialMenu.isMenuVisible { return }
         guard let touch = touches.first, touches.count == 1 else { return }
         stopDeceleration()
         let location = touch.location(in: self)
@@ -493,19 +494,7 @@ private final class TapeCanvasUIView: UIView {
         super.layoutSubviews()
         segmentWidth = max(1, bounds.width * 1.5)
         updateSegmentsIfNeeded()
-        let size: CGFloat = 192
-        layoutMenuSlots(
-            view: menuView,
-            size: size,
-            radius: 52,
-            slots: [colorButton, widthButton, settingsButton, exportButton, sparklesButton]
-        )
-        layoutMenuSlots(
-            view: colorMenuView,
-            size: size,
-            radius: 52,
-            slots: colorButtons.map { Optional($0) }
-        )
+        radialMenu.layout(in: bounds)
         let toastWidth = min(bounds.width - 32, 220)
         toastLabel.frame = CGRect(
             x: (bounds.width - toastWidth) / 2,
@@ -557,100 +546,6 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
-    private func configureMenu() {
-        menuView.backgroundColor = .clear
-        menuView.layer.cornerRadius = 80
-        menuView.layer.shadowColor = UIColor.black.cgColor
-        menuView.layer.shadowOpacity = 0.1
-        menuView.layer.shadowRadius = 10
-        menuView.layer.shadowOffset = CGSize(width: 0, height: 4)
-        menuView.layer.zPosition = 1000
-        menuView.layer.borderWidth = 0
-        menuView.isHidden = true
-        menuView.isUserInteractionEnabled = true
-
-        configureTapButton(
-            colorButton,
-            imageSystemName: "circle.fill",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.showColorMenu() }
-        )
-        colorButton.setImage(makeColorDotsIcon(), for: .normal)
-        configureTapButton(
-            widthButton,
-            imageSystemName: "line.3.horizontal",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.handleWidthTap() }
-        )
-        widthButton.setImage(makeLineWidthIcon(), for: .normal)
-        configureTapButton(
-            eraserButton,
-            imageSystemName: "eraser",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.handleEraserTap() }
-        )
-        configureTapButton(
-            exportButton,
-            imageSystemName: "square.and.arrow.up",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.handleExportTap() }
-        )
-        configureTapButton(
-            settingsButton,
-            imageSystemName: "gearshape",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.handleSettingsTap() }
-        )
-        configureTapButton(
-            sparklesButton,
-            imageSystemName: "sparkles",
-            tintColor: graphiteColor,
-            action: { [weak self] in self?.handleSparklesTap() }
-        )
-
-        [colorButton, widthButton, settingsButton, exportButton, sparklesButton].forEach {
-            $0.backgroundColor = .clear
-            $0.layer.cornerRadius = 0
-            $0.frame.size = CGSize(width: 72, height: 72)
-            menuView.addSubview($0)
-        }
-
-        addSubview(menuView)
-        configureColorMenu()
-    }
-
-    private func configureColorMenu() {
-        colorMenuView.backgroundColor = .clear
-        colorMenuView.layer.cornerRadius = 80
-        colorMenuView.layer.shadowColor = UIColor.black.cgColor
-        colorMenuView.layer.shadowOpacity = 0.1
-        colorMenuView.layer.shadowRadius = 10
-        colorMenuView.layer.shadowOffset = CGSize(width: 0, height: 4)
-        colorMenuView.layer.zPosition = 1001
-        colorMenuView.layer.borderWidth = 0
-        colorMenuView.isHidden = true
-        colorMenuView.isUserInteractionEnabled = true
-
-        colorButtons = colorSubPalette.enumerated().map { index, color in
-            let button = UIButton(type: .system)
-            configureTapButton(
-                button,
-                imageSystemName: "circle.fill",
-                tintColor: color,
-                action: { [weak self] in self?.handleColorSelect(index: index) }
-            )
-            colorMenuView.addSubview(button)
-            return button
-        }
-        colorButtons.forEach {
-            $0.backgroundColor = .clear
-            $0.layer.cornerRadius = 0
-            $0.frame.size = CGSize(width: 72, height: 72)
-        }
-
-        addSubview(colorMenuView)
-    }
-
     private func segmentId(forWorldX worldX: CGFloat) -> Int {
         guard segmentWidth > 0 else { return 0 }
         return Int(floor(worldX / segmentWidth))
@@ -682,60 +577,16 @@ private final class TapeCanvasUIView: UIView {
 
 
     func showMenuAtCenter() {
-        menuCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-        colorMenuView.isHidden = true
-        showMenu(animated: true)
+        radialMenu.showMenuAtCenter()
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
-        guard !menuView.isHidden || !colorMenuView.isHidden else { return }
         let location = recognizer.location(in: self)
-        if !menuView.frame.contains(location) && !colorMenuView.frame.contains(location) {
-            hideMenuAfterSelection()
-        }
-    }
-
-    private func handleColorSelect(index: Int) {
-        guard colorSubPalette.indices.contains(index) else { return }
-        baseStrokeColor = colorSubPalette[index]
-        if isEraser {
-            isEraser = false
-            eraserButton.tintColor = UIColor.black.withAlphaComponent(0.7)
-        }
-        hideMenuAfterSelection()
-    }
-
-    @objc private func handleWidthTap() {
-        switch baseLineWidth {
-        case ..<3:
-            baseLineWidth = 4.2
-        case ..<5:
-            baseLineWidth = 6.2
-        default:
-            baseLineWidth = 2.2
-        }
-        hideMenuAfterSelection()
-    }
-
-    @objc private func handleEraserTap() {
-        isEraser.toggle()
-        eraserButton.tintColor = isEraser ? UIColor.systemBlue : UIColor.black.withAlphaComponent(0.7)
-        hideMenuAfterSelection()
-    }
-
-    @objc private func handleExportTap() {
-        exportVisiblePDF()
-        hideMenuAfterSelection()
-    }
-
-    @objc private func handleSettingsTap() {
-        showToast(text: "Settings")
-        hideMenuAfterSelection()
+        radialMenu.handleTap(at: location)
     }
 
     @objc private func handleSparklesTap() {
         // Placeholder for future feature.
-        hideMenuAfterSelection()
     }
 
     private func exportVisiblePDF() {
@@ -763,103 +614,9 @@ private final class TapeCanvasUIView: UIView {
         guard let controller = findViewController() else { return }
         let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         activity.popoverPresentationController?.sourceView = self
+        let menuCenter = radialMenu.menuCenter
         activity.popoverPresentationController?.sourceRect = CGRect(x: menuCenter.x, y: menuCenter.y, width: 1, height: 1)
         controller.present(activity, animated: true)
-    }
-
-    private func configureTapButton(
-        _ button: UIButton,
-        imageSystemName: String,
-        tintColor: UIColor,
-        action: @escaping () -> Void
-    ) {
-        button.setImage(UIImage(systemName: imageSystemName), for: .normal)
-        button.tintColor = tintColor
-        button.layer.shadowColor = UIColor.black.cgColor
-        button.layer.shadowOpacity = 0.25
-        button.layer.shadowRadius = 2
-        button.layer.shadowOffset = CGSize(width: 0, height: 1)
-        button.layer.masksToBounds = false
-        button.addAction(UIAction { _ in
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            action()
-        }, for: .touchUpInside)
-    }
-
-    private func makeColorDotsIcon(size: CGFloat = 26) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        return renderer.image { context in
-            let dotDiameter = size * 0.24
-            let spacing = size * 0.08
-            let totalWidth = dotDiameter * 3 + spacing * 2
-            let startX = (size - totalWidth) / 2
-            let y = (size - dotDiameter) / 2
-            let colors: [UIColor] = [.red, .green, .blue]
-            for (index, color) in colors.enumerated() {
-                let x = startX + CGFloat(index) * (dotDiameter + spacing)
-                let rect = CGRect(x: x, y: y, width: dotDiameter, height: dotDiameter)
-                context.cgContext.setFillColor(color.cgColor)
-                context.cgContext.fillEllipse(in: rect)
-            }
-        }.withRenderingMode(.alwaysOriginal)
-    }
-
-    private func makeLineWidthIcon(size: CGFloat = 26) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        return renderer.image { context in
-            let startX = size * 0.18
-            let endX = size * 0.82
-            let centerY = size / 2
-            let offsets: [CGFloat] = [-size * 0.18, 0, size * 0.18]
-            let widths: [CGFloat] = [1.2, 2.4, 3.8]
-            context.cgContext.setStrokeColor(graphiteColor.cgColor)
-            context.cgContext.setLineCap(.round)
-            for (offset, width) in zip(offsets, widths) {
-                context.cgContext.setLineWidth(width)
-                context.cgContext.beginPath()
-                context.cgContext.move(to: CGPoint(x: startX, y: centerY + offset))
-                context.cgContext.addLine(to: CGPoint(x: endX, y: centerY + offset))
-                context.cgContext.strokePath()
-            }
-        }.withRenderingMode(.alwaysOriginal)
-    }
-
-    private func layoutMenuSlots(view: UIView, size: CGFloat, radius: CGFloat, slots: [UIButton?]) {
-        guard !slots.isEmpty else { return }
-        view.frame = CGRect(x: menuCenter.x - size / 2, y: menuCenter.y - size / 2, width: size, height: size)
-        let center = CGPoint(x: size / 2, y: size / 2)
-        let angles: [CGFloat] = [
-            -CGFloat.pi / 2,
-            -CGFloat.pi / 6,
-            CGFloat.pi / 6,
-            CGFloat.pi / 2,
-            CGFloat.pi * 5 / 6,
-            -CGFloat.pi * 5 / 6
-        ]
-        for (index, button) in slots.enumerated() {
-            guard let button else { continue }
-            let angle = angles[index % angles.count]
-            let x = center.x + radius * cos(angle) - 36
-            let y = center.y + radius * sin(angle) - 36
-            button.frame = CGRect(x: x, y: y, width: 72, height: 72)
-        }
-    }
-
-    private func showColorMenu() {
-        menuView.isHidden = true
-        colorMenuView.isHidden = false
-        bringSubviewToFront(colorMenuView)
-        setNeedsLayout()
-        colorMenuView.alpha = 0
-        colorMenuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
-        UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
-            self.colorMenuView.alpha = 1
-            self.colorMenuView.transform = .identity
-        }
-    }
-
-    private func hideMenuAfterSelection() {
-        hideMenu(animated: true)
     }
 
     private func configureToast() {
@@ -887,48 +644,6 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
-    private func showMenu(animated: Bool) {
-        menuView.isHidden = false
-        bringSubviewToFront(menuView)
-        setNeedsLayout()
-        if animated {
-            menuView.alpha = 0
-            menuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
-            UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
-                self.menuView.alpha = 1
-                self.menuView.transform = .identity
-            }
-        } else {
-            menuView.alpha = 1
-            menuView.transform = .identity
-        }
-    }
-
-    private func hideMenu(animated: Bool) {
-        if animated {
-            UIView.animate(withDuration: 0.14, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
-                self.menuView.alpha = 0
-                self.menuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
-                self.colorMenuView.alpha = 0
-                self.colorMenuView.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
-            } completion: { _ in
-                self.menuView.isHidden = true
-                self.colorMenuView.isHidden = true
-                self.menuView.alpha = 1
-                self.menuView.transform = .identity
-                self.colorMenuView.alpha = 1
-                self.colorMenuView.transform = .identity
-            }
-        } else {
-            menuView.isHidden = true
-            colorMenuView.isHidden = true
-            menuView.alpha = 1
-            menuView.transform = .identity
-            colorMenuView.alpha = 1
-            colorMenuView.transform = .identity
-        }
-    }
-
     private func findViewController() -> UIViewController? {
         var responder: UIResponder? = self
         while let next = responder?.next {
@@ -944,10 +659,21 @@ private final class TapeCanvasUIView: UIView {
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
-        configureMenu()
+        _ = radialMenu
         configureToast()
         registerForAppLifecycle()
         loadSession()
+    }
+
+    private func cycleLineWidth() {
+        switch baseLineWidth {
+        case ..<3:
+            baseLineWidth = 4.2
+        case ..<5:
+            baseLineWidth = 6.2
+        default:
+            baseLineWidth = 2.2
+        }
     }
 }
 
