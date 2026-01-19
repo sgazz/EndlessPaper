@@ -23,6 +23,11 @@ final class RadialMenuController {
     private var colorButtons: [UIButton] = []
     private let menuCenterKeyX = "radialMenu.center.x"
     private let menuCenterKeyY = "radialMenu.center.y"
+    private var displayLink: CADisplayLink?
+    private var inertiaVelocity: CGPoint = .zero
+    private let inertiaDecelRate: CGFloat = 0.94
+    private let inertiaStopThreshold: CGFloat = 18
+    private let bounceFactor: CGFloat = 1.2
 
     private(set) var menuCenter: CGPoint = .zero
     private lazy var menuPan: UIPanGestureRecognizer = {
@@ -241,12 +246,23 @@ final class RadialMenuController {
     }
 
     @objc private func handleMenuPan(_ recognizer: UIPanGestureRecognizer) {
-        let translation = recognizer.translation(in: host)
-        let next = CGPoint(x: menuCenter.x + translation.x, y: menuCenter.y + translation.y)
-        menuCenter = clamp(point: next, in: host.bounds)
-        recognizer.setTranslation(.zero, in: host)
-        saveMenuCenter()
-        layout(in: host.bounds)
+        switch recognizer.state {
+        case .began:
+            stopInertia()
+        case .changed:
+            let translation = recognizer.translation(in: host)
+            let raw = CGPoint(x: menuCenter.x + translation.x, y: menuCenter.y + translation.y)
+            menuCenter = clamp(point: raw, in: host.bounds)
+            recognizer.setTranslation(.zero, in: host)
+            layout(in: host.bounds)
+        case .ended, .cancelled:
+            let velocity = recognizer.velocity(in: host)
+            inertiaVelocity = CGPoint(x: velocity.x, y: velocity.y)
+            startInertia()
+            saveMenuCenter()
+        default:
+            break
+        }
     }
 
     private func configureTapButton(
@@ -383,6 +399,59 @@ final class RadialMenuController {
             menuView.transform = .identity
             colorMenuView.alpha = 1
             colorMenuView.transform = .identity
+        }
+    }
+
+    private func startInertia() {
+        guard displayLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(handleInertia))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopInertia() {
+        displayLink?.invalidate()
+        displayLink = nil
+        inertiaVelocity = .zero
+    }
+
+    @objc private func handleInertia() {
+        guard displayLink != nil else { return }
+        let dt = CGFloat(displayLink?.duration ?? 1.0 / 60.0)
+        var next = CGPoint(
+            x: menuCenter.x + inertiaVelocity.x * dt,
+            y: menuCenter.y + inertiaVelocity.y * dt
+        )
+
+        let margin: CGFloat = 64
+        let minX = host.bounds.minX + margin
+        let maxX = host.bounds.maxX - margin
+        let minY = host.bounds.minY + margin
+        let maxY = host.bounds.maxY - margin
+
+        if next.x < minX {
+            next.x = minX
+            inertiaVelocity.x = abs(inertiaVelocity.x) * bounceFactor
+        } else if next.x > maxX {
+            next.x = maxX
+            inertiaVelocity.x = -abs(inertiaVelocity.x) * bounceFactor
+        }
+        if next.y < minY {
+            next.y = minY
+            inertiaVelocity.y = abs(inertiaVelocity.y) * bounceFactor
+        } else if next.y > maxY {
+            next.y = maxY
+            inertiaVelocity.y = -abs(inertiaVelocity.y) * bounceFactor
+        }
+
+        inertiaVelocity.x *= pow(inertiaDecelRate, dt * 60)
+        inertiaVelocity.y *= pow(inertiaDecelRate, dt * 60)
+        menuCenter = next
+        layout(in: host.bounds)
+
+        if hypot(inertiaVelocity.x, inertiaVelocity.y) < inertiaStopThreshold {
+            stopInertia()
+            saveMenuCenter()
         }
     }
 
