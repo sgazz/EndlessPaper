@@ -202,9 +202,9 @@ private final class TapeCanvasUIView: UIView {
         let smoothed = smoothedPoints(for: stroke.points, passes: 2).map(transform)
         guard smoothed.count > 1 else { return }
 
-        let tailCount = min(16, max(0, smoothed.count - 1))
+        let tailCount = min(20, max(0, smoothed.count - 1))
         let tailStart = max(0, smoothed.count - 1 - tailCount)
-        let minScale: CGFloat = 0.2
+        let minScale: CGFloat = 0.15
 
         var filteredScale: CGFloat = 1.0
         let smoothingAlpha: CGFloat = 0.18
@@ -217,7 +217,8 @@ private final class TapeCanvasUIView: UIView {
             let tailScale: CGFloat
             if i >= tailStart && tailCount > 0 {
                 let t = CGFloat(smoothed.count - 1 - i) / CGFloat(tailCount)
-                tailScale = max(minScale, t)
+                let eased = t * t * (3 - 2 * t)
+                tailScale = max(minScale, eased * eased)
             } else {
                 tailScale = 1.0
             }
