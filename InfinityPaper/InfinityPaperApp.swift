@@ -36,10 +36,13 @@ struct InfinityPaperApp: App {
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    withAnimation(.easeInOut(duration: 0.6)) {
+                    let fadeDuration: TimeInterval = 0.6
+                    withAnimation(.easeInOut(duration: fadeDuration)) {
                         splashOpacity = 0
                     }
-                    showSplash = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + fadeDuration) {
+                        showSplash = false
+                    }
                 }
             }
         }

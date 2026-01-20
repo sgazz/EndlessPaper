@@ -39,6 +39,9 @@ final class RadialMenuController {
     private lazy var menuPan: UIPanGestureRecognizer = {
         UIPanGestureRecognizer(target: self, action: #selector(handleMenuPan(_:)))
     }()
+    private lazy var colorMenuPan: UIPanGestureRecognizer = {
+        UIPanGestureRecognizer(target: self, action: #selector(handleMenuPan(_:)))
+    }()
 
     init(
         host: UIView,
@@ -220,7 +223,7 @@ final class RadialMenuController {
             $0.frame.size = CGSize(width: 72, height: 72)
         }
 
-        colorMenuView.addGestureRecognizer(menuPan)
+        colorMenuView.addGestureRecognizer(colorMenuPan)
         host.addSubview(colorMenuView)
     }
 

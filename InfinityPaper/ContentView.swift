@@ -703,7 +703,7 @@ private final class TapeCanvasUIView: UIView {
 
     private func configureMenuTriggerButton() {
         menuTriggerButton.backgroundColor = UIColor.white.withAlphaComponent(0.08)
-        menuTriggerButton.layer.cornerRadius = 22
+        menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
         menuTriggerButton.layer.shadowColor = nil
         menuTriggerButton.layer.shadowOpacity = 0
         menuTriggerButton.layer.shadowRadius = 0
@@ -731,8 +731,10 @@ private final class TapeCanvasUIView: UIView {
         let current = menuTriggerButton.center
         let next = CGPoint(x: current.x + translation.x, y: current.y + translation.y)
         menuTriggerButton.center = clampMenuTrigger(point: next)
-        saveMenuTriggerPosition()
         recognizer.setTranslation(.zero, in: self)
+        if recognizer.state == .ended || recognizer.state == .cancelled {
+            saveMenuTriggerPosition()
+        }
     }
 }
 
