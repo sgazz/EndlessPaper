@@ -13,24 +13,27 @@ struct InfinityPaperApp: App {
     @State private var mainOpacity = 0.0
     @State private var splashOpacity = 1.0
     @State private var didStartTransition = false
+    @State private var isMainHitTestingEnabled = false
 
     var body: some Scene {
         WindowGroup {
             ZStack {
                 ContentView()
                     .opacity(mainOpacity)
-                    .allowsHitTesting(!showSplash)
+                    .allowsHitTesting(isMainHitTestingEnabled)
                 SplashView()
                     .opacity(splashOpacity)
-                    .allowsHitTesting(showSplash)
+                    .allowsHitTesting(!isMainHitTestingEnabled)
             }
             .onAppear {
                 guard !didStartTransition else { return }
                 didStartTransition = true
                 mainOpacity = 0
                 splashOpacity = 1
+                isMainHitTestingEnabled = false
                 let overlapStart = 2.2
                 DispatchQueue.main.asyncAfter(deadline: .now() + overlapStart) {
+                    isMainHitTestingEnabled = true
                     withAnimation(.easeInOut(duration: 0.8)) {
                         mainOpacity = 1
                     }

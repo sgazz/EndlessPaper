@@ -102,7 +102,7 @@ final class RadialMenuController {
             view: menuView,
             size: size,
             radius: 52,
-            slots: [colorButton, widthButton, settingsButton, exportButton, sparklesButton]
+            slots: [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton]
         )
         layoutMenuSlots(
             view: colorMenuView,
@@ -182,7 +182,7 @@ final class RadialMenuController {
             action: { [weak self] in self?.handleSparklesTap() }
         )
 
-        [colorButton, widthButton, settingsButton, exportButton, sparklesButton].forEach {
+        [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton].forEach {
             $0.backgroundColor = .clear
             $0.layer.cornerRadius = 0
             $0.frame.size = CGSize(width: 72, height: 72)

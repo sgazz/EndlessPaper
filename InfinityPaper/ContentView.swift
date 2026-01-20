@@ -61,6 +61,7 @@ private final class TapeCanvasUIView: UIView {
 
     fileprivate struct StoredStroke: Codable {
         var points: [StoredPoint]
+        var times: [TimeInterval]?
         var color: StoredColor
         var lineWidth: CGFloat
     }
@@ -419,6 +420,7 @@ private final class TapeCanvasUIView: UIView {
                 strokes: segment.strokes.map { stroke in
                     StoredStroke(
                         points: stroke.points.map { StoredPoint(x: $0.x, y: $0.y) },
+                        times: stroke.times,
                         color: stroke.color.toStoredColor(),
                         lineWidth: stroke.lineWidth
                     )
@@ -446,7 +448,7 @@ private final class TapeCanvasUIView: UIView {
                 let strokes = stored.strokes.map { stroke in
                     Stroke(
                         points: stroke.points.map { CGPoint(x: $0.x, y: $0.y) },
-                        times: [],
+                        times: stroke.times ?? [],
                         color: stroke.color.toUIColor(),
                         lineWidth: stroke.lineWidth
                     )
@@ -477,6 +479,7 @@ private final class TapeCanvasUIView: UIView {
         )
         menuTriggerButton.frame.size = CGSize(width: triggerSize, height: triggerSize)
         menuTriggerButton.center = clampMenuTrigger(point: loadMenuTriggerPosition() ?? defaultCenter)
+        menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
         let toastWidth = min(bounds.width - 32, 220)
         toastLabel.frame = CGRect(
             x: (bounds.width - toastWidth) / 2,
