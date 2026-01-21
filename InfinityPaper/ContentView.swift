@@ -650,6 +650,7 @@ private final class TapeCanvasUIView: UIView {
         addGestureRecognizer(tapRecognizer)
         configureMenuTriggerButton()
         _ = radialMenu
+        radialMenu.syncPaletteIndex()
         configureToast()
         registerForAppLifecycle()
         loadSession()

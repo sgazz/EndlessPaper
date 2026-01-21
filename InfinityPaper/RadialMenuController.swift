@@ -509,6 +509,9 @@ final class RadialMenuController {
         let defaults = UserDefaults.standard
         bounceCount = defaults.integer(forKey: bounceCountKey)
         paletteIndex = defaults.integer(forKey: paletteIndexKey)
+    }
+
+    func syncPaletteIndex() {
         onPaletteIndexChanged(paletteIndex)
     }
 
