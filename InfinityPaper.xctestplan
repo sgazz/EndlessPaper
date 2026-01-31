@@ -1,0 +1,36 @@
+{
+  "configurations" : [
+    {
+      "id" : "A8DEE4E6-A7F7-42B2-8541-9E23A4F7B0FC",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "environmentVariableEntries" : [
+      {
+        "key" : "SWIFT_CONCURRENCY_CHECKS",
+        "value" : "complete"
+      }
+    ],
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:InfinityPaper.xcodeproj",
+      "identifier" : "CFF3A1DA2F1B693B008B7DA4",
+      "name" : "InfinityPaper"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:InfinityPaper.xcodeproj",
+        "identifier" : "CFA8CF722F2E3191003404EB",
+        "name" : "InfinityPaperTests"
+      }
+    }
+  ],
+  "version" : 1
+}
