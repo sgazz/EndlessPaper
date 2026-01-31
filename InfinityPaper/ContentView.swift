@@ -201,8 +201,12 @@ private final class TapeCanvasUIView: UIView {
     var exposedBaseStrokeColor: UIColor { baseStrokeColor }
     /// Exposed for Settings: current line width.
     var exposedBaseLineWidth: CGFloat { baseLineWidth }
-    /// Exposed for Settings: primary color palette.
-    var exposedPrimaryPalette: [UIColor] { primaryColorPalette }
+    /// Exposed for Settings: primary palette, or primary + achievement palette after the bounce Easter egg has been unlocked.
+    var exposedPrimaryPalette: [UIColor] {
+        radialMenu.isAchievementPaletteUnlocked
+            ? primaryColorPalette + achievementColorPalette
+            : primaryColorPalette
+    }
 
     /// Called from Settings: set brush color.
     func setBaseStrokeColorFromSettings(_ color: UIColor) { baseStrokeColor = color }
@@ -894,8 +898,13 @@ private final class TapeCanvasUIView: UIView {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: SettingsKeys.baseColorIndex) != nil {
             let idx = defaults.integer(forKey: SettingsKeys.baseColorIndex)
-            let safeIdx = min(max(0, idx), primaryColorPalette.count - 1)
-            if primaryColorPalette.indices.contains(safeIdx) {
+            if idx < primaryColorPalette.count {
+                baseStrokeColor = primaryColorPalette[idx]
+            } else if radialMenu.isAchievementPaletteUnlocked,
+                      (idx - primaryColorPalette.count) < achievementColorPalette.count {
+                baseStrokeColor = achievementColorPalette[idx - primaryColorPalette.count]
+            } else {
+                let safeIdx = min(max(0, idx), primaryColorPalette.count - 1)
                 baseStrokeColor = primaryColorPalette[safeIdx]
             }
         }

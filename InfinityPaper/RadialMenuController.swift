@@ -28,6 +28,9 @@ final class RadialMenuController {
     private let bounceMilestone = 1000
     private var bounceCount: Int = 0
     private var paletteIndex: Int = 0
+
+    /// True after the color-menu bounce Easter egg has been triggered (1000 bounces). Used so Settings can offer the achievement palette as default colors.
+    var isAchievementPaletteUnlocked: Bool { bounceCount >= bounceMilestone }
     private var displayLink: CADisplayLink?
     private var inertiaVelocity: CGPoint = .zero
     private let inertiaDecelRate: CGFloat = 0.94
