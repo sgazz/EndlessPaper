@@ -19,7 +19,7 @@ struct ContentView: View {
 }
 
 private struct TapeCanvasView: View {
-    @State private var showSettings = false
+    @State private var showAbout = false
     @State private var canvasView: TapeCanvasUIView?
     /// Fallback palette so Settings always shows colors even if canvas isn’t ready yet.
     private static let defaultPalette: [UIColor] = [
@@ -34,30 +34,46 @@ private struct TapeCanvasView: View {
     var body: some View {
         ZStack {
             TapeCanvasRepresentable(
-                onRequestSettings: { showSettings = true },
+                onRequestSettings: { showAbout = true },
                 onCanvasReady: { canvasView = $0 }
             )
             .ignoresSafeArea()
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(
-                palette: canvasView?.exposedPrimaryPalette ?? Self.defaultPalette,
-                currentBaseColor: canvasView?.exposedBaseStrokeColor ?? UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9),
-                currentLineWidth: canvasView?.exposedBaseLineWidth ?? 2.2,
-                onSelectBaseColor: { canvasView?.setBaseStrokeColorFromSettings($0) },
-                onLineWidthChanged: { canvasView?.setBaseLineWidthFromSettings($0) },
-                onClearSession: {
-                    showSettings = false
-                    DispatchQueue.main.async { canvasView?.confirmAndClearSessionFromSettings() }
-                },
-                onLoadPreviousSession: {
-                    showSettings = false
-                    canvasView?.loadSessionFromSettings()
-                },
-                onResetRadialMenuPosition: { canvasView?.resetRadialMenuPositionFromSettings() },
-                onDismiss: { showSettings = false }
-            )
+        .sheet(isPresented: $showAbout) {
+            AboutView(onDismiss: { showAbout = false })
         }
+    }
+}
+
+/// About screen (zen-friendly; replaces visible Settings entry).
+private struct AboutView: View {
+    var onDismiss: () -> Void
+
+    private var appVersion: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        return build != nil ? "\(short) (\(build!))" : short
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Text("Infinity Paper")
+                .font(.title.weight(.medium))
+            Text("Endless drawing canvas")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Text("Version \(appVersion)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text("Hero&Peace© 2026")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.8))
+            Spacer()
+            Button("Done", action: onDismiss)
+                .padding(.bottom, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -109,6 +125,8 @@ private final class TapeCanvasUIView: UIView {
     private var segments: [Int: Segment] = [:]
     private var currentStroke: Stroke?
     private var currentStrokeSegmentId: Int?
+    /// Stack of (segmentId, strokeIndex) for completed strokes; used for Undo (Sparkles).
+    private var undoStack: [(segmentId: Int, strokeIndex: Int)] = []
     private var contentOffset: CGPoint = .zero
     private var displayLink: CADisplayLink?
     private var autoScrollLink: CADisplayLink?
@@ -194,7 +212,7 @@ private final class TapeCanvasUIView: UIView {
         UIPanGestureRecognizer(target: self, action: #selector(handleMenuTriggerPan(_:)))
     }()
 
-    /// Set by the SwiftUI representable to open the Settings sheet when the user taps the gear in the radial menu.
+    /// Set by the SwiftUI representable when the user taps the About (info) button in the radial menu.
     var onRequestSettings: (() -> Void)?
 
     /// Exposed for Settings: current brush color.
@@ -387,6 +405,7 @@ private final class TapeCanvasUIView: UIView {
         var segment = segments[segmentId] ?? Segment(id: segmentId, strokes: [])
         segment.strokes.append(stroke)
         segments[segmentId] = segment
+        undoStack.append((segmentId, segment.strokes.count - 1))
         telemetry.recordStroke(points: stroke.points.count)
         currentStroke = nil
         currentStrokeSegmentId = nil
@@ -579,6 +598,7 @@ private final class TapeCanvasUIView: UIView {
                 return (stored.id, Segment(id: stored.id, strokes: strokes))
             })
             contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
+            undoStack.removeAll()
             setNeedsDisplay()
         } catch {
             sessionLogger.debug("Session load skipped or failed: \(error.localizedDescription)")
@@ -692,7 +712,22 @@ private final class TapeCanvasUIView: UIView {
     }
 
     @objc private func handleSparklesTap() {
-        // Placeholder for future feature.
+        undoLastStroke()
+    }
+
+    /// Removes the most recently completed stroke (Undo). No-op if nothing to undo.
+    private func undoLastStroke() {
+        guard let last = undoStack.popLast() else { return }
+        guard var segment = segments[last.segmentId],
+              last.strokeIndex < segment.strokes.count else { return }
+        segment.strokes.remove(at: last.strokeIndex)
+        if segment.strokes.isEmpty {
+            segments.removeValue(forKey: last.segmentId)
+        } else {
+            segments[last.segmentId] = segment
+        }
+        setNeedsDisplay()
+        showToast(text: "Undo")
     }
 
     private func exportVisible() {
@@ -809,13 +844,13 @@ private final class TapeCanvasUIView: UIView {
         guard let controller = findViewController() else { return }
         let alert = UIAlertController(
             title: "Clear drawing?",
-            message: "This will remove all strokes and the saved session. This cannot be undone.",
+            message: "This will remove all strokes in current session. This cannot be undone.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
             self?.clearLastDrawingSession()
-            self?.showToast(text: "Session cleared – drawing and autosave removed.")
+            self?.showToast(text: "Current session cleared.")
         })
         if let popover = alert.popoverPresentationController {
             popover.sourceView = self
@@ -826,10 +861,11 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func clearLastDrawingSession() {
-        // Clear all segments and current stroke; reset telemetry and redraw.
+        // Clear all segments and current stroke; reset telemetry, undo stack, and redraw.
         segments.removeAll()
         currentStroke = nil
         currentStrokeSegmentId = nil
+        undoStack.removeAll()
         telemetry = Telemetry()
         didShowSavedToastThisSession = false
         try? FileManager.default.removeItem(at: SessionPersistence.sessionURL())

@@ -203,10 +203,10 @@ final class RadialMenuController {
         let verbose = verboseAccessibilityHints
         colorButton.accessibilityHint = verbose ? "Double-tap to open the color palette and choose a brush color." : "Opens the color palette"
         widthButton.accessibilityHint = verbose ? "Double-tap to cycle through thin, medium, and thick brush widths." : "Cycles through brush widths"
-        eraserButton.accessibilityHint = verbose ? "Double-tap to clear the current drawing and saved session. You will be asked to confirm." : "Clears the last drawing session"
+        eraserButton.accessibilityHint = verbose ? "Double-tap to clear all strokes in the current session. You will be asked to confirm." : "Clears current session"
         exportButton.accessibilityHint = verbose ? "Double-tap to share or save your drawing as a file (PDF or PNG, depending on settings)." : "Share or save your drawing"
-        settingsButton.accessibilityHint = verbose ? "Double-tap to open app settings for brush, export, and session options." : "Opens app settings"
-        sparklesButton.accessibilityHint = verbose ? "Double-tap to apply special effects (feature coming soon)." : "Applies special effects"
+        settingsButton.accessibilityHint = verbose ? "Double-tap to show app name and version." : "App name and version"
+        sparklesButton.accessibilityHint = verbose ? "Double-tap to undo the last stroke." : "Undo last stroke"
         for button in colorButtons {
             button.accessibilityHint = verbose ? "Double-tap to select this color for the brush." : "Selects this color"
         }
@@ -297,7 +297,7 @@ final class RadialMenuController {
         )
         configureTapButton(
             settingsButton,
-            imageSystemName: "gearshape",
+            imageSystemName: "info.circle",
             tintColor: graphiteColor,
             action: { [weak self] in self?.handleSettingsTap() }
         )
@@ -428,16 +428,16 @@ final class RadialMenuController {
             button.accessibilityHint = "Cycles through brush widths"
         } else if button === eraserButton {
             button.accessibilityLabel = "Clear"
-            button.accessibilityHint = "Clears the last drawing session"
+            button.accessibilityHint = "Clears current session"
         } else if button === exportButton {
             button.accessibilityLabel = "Export"
             button.accessibilityHint = "Share or save your drawing"
         } else if button === settingsButton {
-            button.accessibilityLabel = "Settings"
-            button.accessibilityHint = "Opens app settings"
+            button.accessibilityLabel = "About"
+            button.accessibilityHint = "App name and version"
         } else if button === sparklesButton {
-            button.accessibilityLabel = "Effects"
-            button.accessibilityHint = "Applies special effects"
+            button.accessibilityLabel = "Undo"
+            button.accessibilityHint = "Undo last stroke"
         }
 
         button.addAction(UIAction { [weak self] _ in
