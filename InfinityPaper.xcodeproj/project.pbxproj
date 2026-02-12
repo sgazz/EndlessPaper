@@ -6,11 +6,28 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		CFA8CF772F2E3191003404EB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFF3A1D32F1B693B008B7DA4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CFF3A1DA2F1B693B008B7DA4;
+			remoteInfo = InfinityPaper;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		CFA8CF732F2E3191003404EB /* InfinityPaperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InfinityPaperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFA8CF802F2E5C95003404EB /* InfinityPaper.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = InfinityPaper.xctestplan; sourceTree = "<group>"; };
 		CFF3A1DB2F1B693B008B7DA4 /* InfinityPaper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InfinityPaper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		CFA8CF742F2E3191003404EB /* InfinityPaperTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = InfinityPaperTests;
+			sourceTree = "<group>";
+		};
 		CFF3A1DD2F1B693B008B7DA4 /* InfinityPaper */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = InfinityPaper;
@@ -19,6 +36,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		CFA8CF702F2E3191003404EB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CFF3A1D82F1B693B008B7DA4 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -32,7 +56,9 @@
 		CFF3A1D22F1B693B008B7DA4 = {
 			isa = PBXGroup;
 			children = (
+				CFA8CF802F2E5C95003404EB /* InfinityPaper.xctestplan */,
 				CFF3A1DD2F1B693B008B7DA4 /* InfinityPaper */,
+				CFA8CF742F2E3191003404EB /* InfinityPaperTests */,
 				CFF3A1DC2F1B693B008B7DA4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +67,7 @@
 			isa = PBXGroup;
 			children = (
 				CFF3A1DB2F1B693B008B7DA4 /* InfinityPaper.app */,
+				CFA8CF732F2E3191003404EB /* InfinityPaperTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,6 +75,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		CFA8CF722F2E3191003404EB /* InfinityPaperTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFA8CF792F2E3191003404EB /* Build configuration list for PBXNativeTarget "InfinityPaperTests" */;
+			buildPhases = (
+				CFA8CF6F2F2E3191003404EB /* Sources */,
+				CFA8CF702F2E3191003404EB /* Frameworks */,
+				CFA8CF712F2E3191003404EB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CFA8CF782F2E3191003404EB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CFA8CF742F2E3191003404EB /* InfinityPaperTests */,
+			);
+			name = InfinityPaperTests;
+			packageProductDependencies = (
+			);
+			productName = InfinityPaperTests;
+			productReference = CFA8CF732F2E3191003404EB /* InfinityPaperTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		CFF3A1DA2F1B693B008B7DA4 /* InfinityPaper */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = CFF3A1E62F1B693B008B7DA4 /* Build configuration list for PBXNativeTarget "InfinityPaper" */;
@@ -80,6 +130,10 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					CFA8CF722F2E3191003404EB = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = CFF3A1DA2F1B693B008B7DA4;
+					};
 					CFF3A1DA2F1B693B008B7DA4 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -100,11 +154,19 @@
 			projectRoot = "";
 			targets = (
 				CFF3A1DA2F1B693B008B7DA4 /* InfinityPaper */,
+				CFA8CF722F2E3191003404EB /* InfinityPaperTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		CFA8CF712F2E3191003404EB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CFF3A1D92F1B693B008B7DA4 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -115,6 +177,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		CFA8CF6F2F2E3191003404EB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CFF3A1D72F1B693B008B7DA4 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +193,59 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		CFA8CF782F2E3191003404EB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CFF3A1DA2F1B693B008B7DA4 /* InfinityPaper */;
+			targetProxy = CFA8CF772F2E3191003404EB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		CFA8CF7A2F2E3191003404EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 83F7KY8L5Y;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Gazza.InfinityPaperTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/InfinityPaper.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/InfinityPaper";
+			};
+			name = Debug;
+		};
+		CFA8CF7B2F2E3191003404EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 83F7KY8L5Y;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Gazza.InfinityPaperTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/InfinityPaper.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/InfinityPaper";
+			};
+			name = Release;
+		};
 		CFF3A1E42F1B693B008B7DA4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -253,7 +374,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 83F7KY8L5Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -270,7 +391,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.02;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = Gazza.InfinityPaper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -290,7 +411,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 83F7KY8L5Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -307,7 +428,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.02;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = Gazza.InfinityPaper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -323,6 +444,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		CFA8CF792F2E3191003404EB /* Build configuration list for PBXNativeTarget "InfinityPaperTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFA8CF7A2F2E3191003404EB /* Debug */,
+				CFA8CF7B2F2E3191003404EB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		CFF3A1D62F1B693B008B7DA4 /* Build configuration list for PBXProject "InfinityPaper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
