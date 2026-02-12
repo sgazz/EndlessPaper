@@ -34,8 +34,8 @@ private struct TapeCanvasView: View {
     var body: some View {
         ZStack {
             TapeCanvasRepresentable(
-                onRequestSettings: { showAbout = true },
-                onCanvasReady: { canvasView = $0 }
+                onRequestSettings: { DispatchQueue.main.async { showAbout = true } },
+                onCanvasReady: { view in DispatchQueue.main.async { canvasView = view } }
             )
             .ignoresSafeArea()
         }
