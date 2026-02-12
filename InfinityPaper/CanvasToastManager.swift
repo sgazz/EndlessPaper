@@ -1,0 +1,147 @@
+//
+//  CanvasToastManager.swift
+//  InfinityPaper
+//
+//  Manages toast message presentation for the canvas view.
+//
+
+import UIKit
+
+/// Toast message types with distinct visual styles.
+enum ToastType {
+    case success
+    case error
+    case warning
+    case info
+
+    var backgroundColor: UIColor {
+        UIColor { traitCollection in
+            let isDark = traitCollection.userInterfaceStyle == .dark
+            switch self {
+            case .success:
+                return isDark
+                    ? UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.95)
+                    : UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.95)
+            case .error:
+                return isDark
+                    ? UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.95)
+                    : UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.95)
+            case .warning:
+                return isDark
+                    ? UIColor(red: 0.95, green: 0.65, blue: 0.1, alpha: 0.95)
+                    : UIColor(red: 0.95, green: 0.65, blue: 0.1, alpha: 0.95)
+            case .info:
+                return isDark
+                    ? UIColor(white: 0.2, alpha: 0.95)
+                    : UIColor(white: 0.95, alpha: 0.95)
+            }
+        }
+    }
+
+    var textColor: UIColor {
+        UIColor.white.withAlphaComponent(0.95)
+    }
+}
+
+/// Manages toast message presentation for the canvas.
+final class CanvasToastManager {
+    private let label: UILabel
+    private var timer: Timer?
+    private weak var parentView: UIView?
+    private var currentTraitCollection: UITraitCollection
+    
+    private enum Layout {
+        static let toastBottomOffset: CGFloat = 96
+        static let toastWidthMax: CGFloat = 220
+        static let toastHorizontalMargin: CGFloat = 32
+        static let toastVisibleDuration: TimeInterval = 1.2
+    }
+    
+    private enum DesignTokens {
+        static let cornerRadiusMedium: CGFloat = 10
+        static let animationDurationFast: TimeInterval = 0.15
+        static let animationDurationMedium: TimeInterval = 0.2
+    }
+    
+    /// Initializes the toast manager with a parent view.
+    /// - Parameters:
+    ///   - parentView: The view that will host the toast label
+    ///   - traitCollection: Initial trait collection for appearance
+    init(parentView: UIView, traitCollection: UITraitCollection) {
+        self.parentView = parentView
+        self.currentTraitCollection = traitCollection
+        self.label = UILabel()
+        configureLabel()
+        parentView.addSubview(label)
+    }
+    
+    /// Updates the trait collection for appearance changes (e.g., dark mode).
+    func updateTraitCollection(_ traitCollection: UITraitCollection) {
+        currentTraitCollection = traitCollection
+        updateAppearance()
+    }
+    
+    /// Updates the toast label frame for layout changes.
+    /// - Parameter bounds: The parent view's bounds
+    func updateLayout(in bounds: CGRect) {
+        let toastWidth = min(bounds.width - Layout.toastHorizontalMargin, Layout.toastWidthMax)
+        label.frame = CGRect(
+            x: (bounds.width - toastWidth) / 2,
+            y: bounds.height - Layout.toastBottomOffset,
+            width: toastWidth,
+            height: 36
+        )
+    }
+    
+    /// Shows a toast message with the specified type.
+    /// - Parameters:
+    ///   - text: The message text to display
+    ///   - type: The toast type (default: .info)
+    func show(text: String, type: ToastType = .info) {
+        guard let parentView = parentView else { return }
+        
+        timer?.invalidate()
+        label.text = text
+        updateAppearance(for: type)
+        parentView.bringSubviewToFront(label)
+        
+        // Animate based on type: error/warning get slight scale animation
+        let scale: CGFloat = (type == .error || type == .warning) ? 1.05 : 1.0
+        
+        label.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+        label.alpha = 0
+        
+        UIView.animate(withDuration: DesignTokens.animationDurationFast, delay: 0, options: [.curveEaseOut]) {
+            self.label.alpha = 1
+            self.label.transform = CGAffineTransform(scaleX: scale, y: scale)
+        } completion: { _ in
+            UIView.animate(withDuration: DesignTokens.animationDurationFast * 0.67) {
+                self.label.transform = .identity
+            }
+        }
+        
+        timer = Timer.scheduledTimer(withTimeInterval: Layout.toastVisibleDuration, repeats: false) { [weak self] _ in
+            UIView.animate(withDuration: DesignTokens.animationDurationMedium) {
+                self?.label.alpha = 0
+                self?.label.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+            }
+        }
+    }
+    
+    // MARK: - Private
+    
+    private func configureLabel() {
+        label.textAlignment = .center
+        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        label.layer.cornerRadius = DesignTokens.cornerRadiusMedium
+        label.layer.masksToBounds = true
+        label.alpha = 0
+        updateAppearance()
+    }
+    
+    private func updateAppearance(for type: ToastType? = nil) {
+        let toastType = type ?? .info
+        label.textColor = toastType.textColor
+        label.backgroundColor = toastType.backgroundColor.resolvedColor(with: currentTraitCollection)
+    }
+}

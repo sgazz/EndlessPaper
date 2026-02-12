@@ -220,64 +220,14 @@ private final class TapeCanvasUIView: UIView {
     ]
     private var lastPaletteIndex: Int?
     private var telemetry = Telemetry()
-    private let sessionLogger = Logger(subsystem: "InfinityPaper", category: "Session")
-    private enum SessionKeys {
-        static let autosaveMode = "settings.session.autosaveMode"
-        static let autoloadOnLaunch = "settings.session.autoload"
-    }
-
-    private enum ExportKeys {
-        static let format = "settings.export.format"
-        static let resolution = "settings.export.resolution"
-        static let margin = "settings.export.margin"
-        static let includeNoise = "settings.export.includeNoise"
-        static let transparent = "settings.export.transparent"
-        static let autoName = "settings.export.autoName"
-        static let prefix = "settings.export.prefix"
-    }
-    private static let periodicSaveInterval: TimeInterval = 60
-    private var periodicSaveTimer: Timer?
     private var didShowSavedToastThisSession = false
     private var segmentWidth: CGFloat = 1
-    private let toastLabel = UILabel()
-    private var toastTimer: Timer?
+    private lazy var toastManager: CanvasToastManager = {
+        CanvasToastManager(parentView: self, traitCollection: traitCollection)
+    }()
+    private let exportManager = CanvasExportManager()
+    private let sessionManager = CanvasSessionManager()
     private let menuTriggerButton = UIButton(type: .custom)
-
-    /// Toast message types with distinct visual styles.
-    private enum ToastType {
-        case success
-        case error
-        case warning
-        case info
-
-        var backgroundColor: UIColor {
-            UIColor { traitCollection in
-                let isDark = traitCollection.userInterfaceStyle == .dark
-                switch self {
-                case .success:
-                    return isDark
-                        ? UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.95)
-                        : UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.95)
-                case .error:
-                    return isDark
-                        ? UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.95)
-                        : UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.95)
-                case .warning:
-                    return isDark
-                        ? UIColor(red: 0.95, green: 0.65, blue: 0.1, alpha: 0.95)
-                        : UIColor(red: 0.95, green: 0.65, blue: 0.1, alpha: 0.95)
-                case .info:
-                    return isDark
-                        ? UIColor(white: 0.2, alpha: 0.95)
-                        : UIColor(white: 0.95, alpha: 0.95)
-                }
-            }
-        }
-
-        var textColor: UIColor {
-            UIColor.white.withAlphaComponent(0.95)
-        }
-    }
     private let menuTriggerKeyX = "menuTrigger.center.x"
     private let menuTriggerKeyY = "menuTrigger.center.y"
     private lazy var radialMenu = RadialMenuController(
@@ -355,15 +305,21 @@ private final class TapeCanvasUIView: UIView {
     }
 
     deinit {
-        stopPeriodicSaveTimer()
-        NotificationCenter.default.removeObserver(self)
+        sessionManager.stopPeriodicSaveTimer()
+        // Note: sessionManager handles its own NotificationCenter cleanup in deinit
     }
 
     override func draw(_ rect: CGRect) {
         guard needsRedraw, let context = UIGraphicsGetCurrentContext() else { return }
         
         // Draw noise texture on top of background layer
-        drawNoise(in: context, rect: rect)
+        noiseTile = CanvasRenderer.drawNoise(
+            in: context,
+            rect: rect,
+            noiseTile: noiseTile,
+            backgroundColor: backgroundColorTone,
+            traitCollection: traitCollection
+        )
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
@@ -371,12 +327,20 @@ private final class TapeCanvasUIView: UIView {
         for id in visibleIds {
             guard let segment = segments[id] else { continue }
             for stroke in segment.strokes {
-                drawStroke(stroke, in: context)
+                CanvasRenderer.drawStroke(
+                    toRenderStroke(stroke),
+                    in: context,
+                    contentOffset: contentOffset
+                )
             }
         }
 
         if let stroke = currentStroke {
-            drawStroke(stroke, in: context)
+            CanvasRenderer.drawStroke(
+                toRenderStroke(stroke),
+                in: context,
+                contentOffset: contentOffset
+            )
         }
         
         needsRedraw = false
@@ -392,86 +356,14 @@ private final class TapeCanvasUIView: UIView {
         super.setNeedsDisplay(rect)
     }
 
-    private func drawStroke(_ stroke: Stroke, in context: CGContext) {
-        guard stroke.points.count > 1 else { return }
-        context.setStrokeColor(stroke.color.cgColor)
-        drawStrokeSegments(stroke, in: context, transform: toViewPoint(_:))
-    }
-
-    private func drawStrokeWorld(_ stroke: Stroke, in context: CGContext) {
-        guard stroke.points.count > 1 else { return }
-        context.setStrokeColor(stroke.color.cgColor)
-        drawStrokeSegments(stroke, in: context, transform: { $0 })
-    }
-
-    private func drawStrokeSegments(
-        _ stroke: Stroke,
-        in context: CGContext,
-        transform: (CGPoint) -> CGPoint
-    ) {
-        let smoothed = smoothedPoints(for: stroke.points, passes: 2).map(transform)
-        guard smoothed.count > 1 else { return }
-
-        let tailCount = min(20, max(0, smoothed.count - 1))
-        let tailStart = max(0, smoothed.count - 1 - tailCount)
-        let minScale: CGFloat = 0.15
-
-        var filteredScale: CGFloat = 1.0
-        let smoothingAlpha = Layout.strokeSmoothingAlpha
-        for i in 1..<smoothed.count {
-            let start = smoothed[i - 1]
-            let end = smoothed[i]
-            let targetScale = targetWidthScale(for: stroke, index: i)
-            filteredScale = filteredScale + (targetScale - filteredScale) * smoothingAlpha
-            let width = stroke.lineWidth * filteredScale
-            let tailScale: CGFloat
-            if i >= tailStart && tailCount > 0 {
-                let t = CGFloat(smoothed.count - 1 - i) / CGFloat(tailCount)
-                let eased = t * t * (3 - 2 * t)
-                tailScale = max(minScale, eased * eased)
-            } else {
-                tailScale = 1.0
-            }
-            context.setLineWidth(max(0.4, width * tailScale))
-            context.beginPath()
-            context.move(to: start)
-            context.addLine(to: end)
-            context.strokePath()
-        }
-    }
-
-    private func smoothedPoints(for points: [CGPoint], passes: Int) -> [CGPoint] {
-        guard points.count > 2 else { return points }
-        var current = points
-        for _ in 0..<passes {
-            var next = current
-            for i in 1..<(current.count - 1) {
-                let prev = current[i - 1]
-                let curr = current[i]
-                let nextPoint = current[i + 1]
-                next[i] = CGPoint(
-                    x: prev.x * 0.25 + curr.x * 0.5 + nextPoint.x * 0.25,
-                    y: prev.y * 0.25 + curr.y * 0.5 + nextPoint.y * 0.25
-                )
-            }
-            current = next
-        }
-        return current
-    }
-
-    private func targetWidthScale(for stroke: Stroke, index: Int) -> CGFloat {
-        guard stroke.times.count > index else { return 1.0 }
-        let dt = max(0.0001, stroke.times[index] - stroke.times[index - 1])
-        let p0 = stroke.points[index - 1]
-        let p1 = stroke.points[index]
-        let distance = hypot(p1.x - p0.x, p1.y - p0.y)
-        let speed = distance / CGFloat(dt)
-        let minSpeed: CGFloat = 30
-        let maxSpeed: CGFloat = 1200
-        let normalized = min(1, max(0, (speed - minSpeed) / (maxSpeed - minSpeed)))
-        let thick = 1.15
-        let thin = 0.6
-        return thick - (thick - thin) * normalized
+    /// Converts internal Stroke to RenderStroke for rendering.
+    private func toRenderStroke(_ stroke: Stroke) -> RenderStroke {
+        RenderStroke(
+            points: stroke.points,
+            times: stroke.times,
+            color: stroke.color,
+            lineWidth: stroke.lineWidth
+        )
     }
 
     private func toWorldPoint(_ viewPoint: CGPoint) -> CGPoint {
@@ -607,53 +499,16 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func registerForAppLifecycle() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(appWillResignActive),
-            name: UIApplication.willResignActiveNotification,
-            object: nil
+        sessionManager.registerForAppLifecycle(
+            saveOnResign: { [weak self] in
+                self?.persistSessionIfNeeded()
+            },
+            resumeOnActive: { [weak self] in
+                self?.sessionManager.startPeriodicSaveTimerIfNeeded { [weak self] in
+                    self?.saveSession()
+                }
+            }
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(appDidBecomeActive),
-            name: UIApplication.didBecomeActiveNotification,
-            object: nil
-        )
-    }
-
-    private func shouldAutoloadOnLaunch() -> Bool {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: SessionKeys.autoloadOnLaunch) != nil else { return true }
-        return defaults.bool(forKey: SessionKeys.autoloadOnLaunch)
-    }
-
-    private func currentAutosaveMode() -> AutosaveMode {
-        let raw = UserDefaults.standard.string(forKey: SessionKeys.autosaveMode) ?? AutosaveMode.onBackground.rawValue
-        return AutosaveMode(rawValue: raw) ?? .onBackground
-    }
-
-    private func startPeriodicSaveTimerIfNeeded() {
-        stopPeriodicSaveTimer()
-        guard currentAutosaveMode() == .periodic else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: Self.periodicSaveInterval, repeats: true) { [weak self] _ in
-            self?.saveSession()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        periodicSaveTimer = timer
-    }
-
-    private func stopPeriodicSaveTimer() {
-        periodicSaveTimer?.invalidate()
-        periodicSaveTimer = nil
-    }
-
-    @objc private func appWillResignActive() {
-        persistSessionIfNeeded()
-        stopPeriodicSaveTimer()
-    }
-
-    @objc private func appDidBecomeActive() {
-        startPeriodicSaveTimerIfNeeded()
     }
 
     func persistSessionIfNeeded() {
@@ -679,44 +534,48 @@ private final class TapeCanvasUIView: UIView {
             contentOffset: StoredPoint(x: contentOffset.x, y: contentOffset.y),
             savedAt: Date().timeIntervalSince1970
         )
-        do {
-            let data = try SessionPersistence.encode(storedSession)
-            try data.write(to: SessionPersistence.sessionURL(), options: Data.WritingOptions.atomic)
-            if !didShowSavedToastThisSession {
-                didShowSavedToastThisSession = true
-                DispatchQueue.main.async { [weak self] in
-                    self?.showToast(text: "Saved", type: .success)
+        
+        sessionManager.saveSession(storedSession) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success:
+                if !self.didShowSavedToastThisSession {
+                    self.didShowSavedToastThisSession = true
+                    DispatchQueue.main.async {
+                        self.showToast(text: "Saved", type: .success)
+                    }
                 }
-            }
-        } catch {
-            let errorMessage = "Session save failed: \(error.localizedDescription)"
-            sessionLogger.error("Session save failed: \(error.localizedDescription)")
-            DispatchQueue.main.async { [weak self] in
-                self?.showToast(text: "Save failed", type: .error)
+            case .failure(_):
+                DispatchQueue.main.async {
+                    self.showToast(text: "Save failed", type: .error)
+                }
             }
         }
     }
 
     func loadSession() {
-        do {
-            let data = try Data(contentsOf: SessionPersistence.sessionURL())
-            let storedSession = try SessionPersistence.decode(from: data)
-            segments = Dictionary(uniqueKeysWithValues: storedSession.segments.map { stored in
-                let strokes = stored.strokes.map { stroke in
-                    Stroke(
-                        points: stroke.points.map { CGPoint(x: $0.x, y: $0.y) },
-                        times: stroke.times ?? [],
-                        color: stroke.color.toUIColor(),
-                        lineWidth: stroke.lineWidth
-                    )
-                }
-                return (stored.id, Segment(id: stored.id, strokes: strokes))
-            })
-            contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
-            undoStack.removeAll()
-            setNeedsDisplay()
-        } catch {
-            sessionLogger.debug("Session load skipped or failed: \(error.localizedDescription)")
+        sessionManager.loadSession { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let storedSession):
+                self.segments = Dictionary(uniqueKeysWithValues: storedSession.segments.map { stored in
+                    let strokes = stored.strokes.map { stroke in
+                        Stroke(
+                            points: stroke.points.map { CGPoint(x: $0.x, y: $0.y) },
+                            times: stroke.times ?? [],
+                            color: stroke.color.toUIColor(),
+                            lineWidth: stroke.lineWidth
+                        )
+                    }
+                    return (stored.id, Segment(id: stored.id, strokes: strokes))
+                })
+                self.contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
+                self.undoStack.removeAll()
+                self.setNeedsDisplay()
+            case .failure:
+                // Session load failed - this is expected if no session exists yet
+                break
+            }
         }
     }
 
@@ -743,14 +602,7 @@ private final class TapeCanvasUIView: UIView {
         menuTriggerButton.center = clampMenuTrigger(point: loadMenuTriggerPosition() ?? defaultCenter)
         menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
         updateMenuTriggerButtonAppearance()
-        let toastWidth = min(bounds.width - Layout.toastHorizontalMargin, Layout.toastWidthMax)
-        toastLabel.frame = CGRect(
-            x: (bounds.width - toastWidth) / 2,
-            y: bounds.height - Layout.toastBottomOffset,
-            width: toastWidth,
-            height: 36
-        )
-        updateToastAppearance()
+        toastManager.updateLayout(in: bounds)
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -761,19 +613,10 @@ private final class TapeCanvasUIView: UIView {
             backgroundLayer.backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection).cgColor
             noiseTile = nil // Invalidate noise tile cache to regenerate with new colors
             updateMenuTriggerButtonAppearance()
-            updateToastAppearance()
+            toastManager.updateTraitCollection(traitCollection)
             radialMenu.updateColorsForDarkMode(graphiteColor: graphiteColor.resolvedColor(with: traitCollection))
             setNeedsDisplay()
         }
-    }
-
-    private func drawNoise(in context: CGContext, rect: CGRect) {
-        if noiseTile == nil {
-            noiseTile = makeNoiseTile(size: Layout.noiseTileSize)
-        }
-        guard let noiseTile else { return }
-        UIColor(patternImage: noiseTile).setFill()
-        context.fill(rect)
     }
 
     private func drawStrokesForExport(in context: CGContext) {
@@ -783,34 +626,11 @@ private final class TapeCanvasUIView: UIView {
         for id in visibleIds {
             guard let segment = segments[id] else { continue }
             for stroke in segment.strokes {
-                drawStrokeWorld(stroke, in: context)
+                CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
             }
         }
         if let stroke = currentStroke {
-            drawStrokeWorld(stroke, in: context)
-        }
-    }
-
-    private func makeNoiseTile(size: CGFloat) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        let resolvedBg = backgroundColorTone.resolvedColor(with: traitCollection)
-        let isDark = traitCollection.userInterfaceStyle == .dark
-        return renderer.image { ctx in
-            let base = resolvedBg.withAlphaComponent(0.02)
-            base.setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
-
-            for _ in 0..<250 {
-                let x = CGFloat.random(in: 0..<size)
-                let y = CGFloat.random(in: 0..<size)
-                let alpha = CGFloat.random(in: 0.015...0.05)
-                // In dark mode, use lighter dots; in light mode, use darker dots
-                let dotColor = isDark
-                    ? UIColor(white: 1.0, alpha: alpha)
-                    : UIColor(white: 0.0, alpha: alpha)
-                ctx.cgContext.setFillColor(dotColor.cgColor)
-                ctx.cgContext.fillEllipse(in: CGRect(x: x, y: y, width: 1.2, height: 1.2))
-            }
+            CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
         }
     }
 
@@ -877,112 +697,30 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func exportVisible() {
-        let defaults = UserDefaults.standard
-        let formatRaw = defaults.string(forKey: ExportKeys.format) ?? ExportFormat.pdf.rawValue
-        let format = ExportFormat(rawValue: formatRaw) ?? .pdf
-        if format == .png {
-            exportVisiblePNG()
-        } else {
-            exportVisiblePDF()
-        }
-    }
-
-    private func exportFileName(extension ext: String) -> String {
-        let defaults = UserDefaults.standard
-        let autoName = defaults.object(forKey: ExportKeys.autoName) != nil && defaults.bool(forKey: ExportKeys.autoName)
-        let prefix = defaults.string(forKey: ExportKeys.prefix) ?? "InfinityPaper_"
-        if autoName {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-            formatter.timeZone = TimeZone.current
-            let stamp = formatter.string(from: Date())
-            return "\(prefix)\(stamp).\(ext)"
-        }
-        return "InfinityPaper.\(ext)"
-    }
-
-    private func exportVisiblePDF() {
-        let defaults = UserDefaults.standard
-        let margin = defaults.object(forKey: ExportKeys.margin) != nil ? CGFloat(defaults.double(forKey: ExportKeys.margin)) : 0
-        let pageBounds = bounds
-        let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
-        let data = renderer.pdfData { context in
-            context.beginPage()
-            let cgContext = context.cgContext
-            cgContext.setFillColor(backgroundColorTone.cgColor)
-            cgContext.fill(pageBounds)
-            cgContext.translateBy(x: -contentOffset.x + margin, y: -contentOffset.y + margin)
-            drawStrokesForExport(in: cgContext)
-        }
-
-        let name = exportFileName(extension: "pdf")
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        do {
-            try data.write(to: tempURL, options: Data.WritingOptions.atomic)
-            presentShare(url: tempURL)
-            showToast(text: "PDF exported", type: .success)
-        } catch {
-            let errorMessage = "Failed to export PDF: \(error.localizedDescription)"
-            sessionLogger.error("Export PDF write failed: \(error.localizedDescription)")
-            showToast(text: "Export failed", type: .error)
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-        }
-    }
-
-    private func exportVisiblePNG() {
-        let defaults = UserDefaults.standard
-        let resolution = defaults.object(forKey: ExportKeys.resolution) != nil ? CGFloat(defaults.double(forKey: ExportKeys.resolution)) : 2.0
-        let margin = defaults.object(forKey: ExportKeys.margin) != nil ? CGFloat(defaults.double(forKey: ExportKeys.margin)) : 0
-        let includeNoise = defaults.object(forKey: ExportKeys.includeNoise) == nil || defaults.bool(forKey: ExportKeys.includeNoise)
-        let transparent = defaults.object(forKey: ExportKeys.transparent) != nil && defaults.bool(forKey: ExportKeys.transparent)
-
-        let contentSize = bounds.size
-        let imageSize = CGSize(width: contentSize.width + 2 * margin, height: contentSize.height + 2 * margin)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = resolution
-        let renderer = UIGraphicsImageRenderer(size: imageSize, format: format)
-        let image = renderer.image { _ in
-            let rect = CGRect(origin: .zero, size: imageSize)
-            if transparent {
-                UIColor.clear.setFill()
-                UIGraphicsGetCurrentContext()?.fill(rect)
-            } else {
-                backgroundColorTone.setFill()
-                UIGraphicsGetCurrentContext()?.fill(rect)
+        exportManager.exportVisible(
+            bounds: bounds,
+            contentOffset: contentOffset,
+            backgroundColor: backgroundColorTone.resolvedColor(with: traitCollection),
+            drawStrokes: { [weak self] context in
+                self?.drawStrokesForExport(in: context)
+            },
+            drawNoise: { [weak self] context, rect in
+                guard let self = self else { return }
+                self.noiseTile = CanvasRenderer.drawNoise(
+                    in: context,
+                    rect: rect,
+                    noiseTile: self.noiseTile,
+                    backgroundColor: self.backgroundColorTone,
+                    traitCollection: self.traitCollection
+                )
+            },
+            presentShare: { [weak self] url in
+                self?.presentShare(url: url)
+            },
+            showToast: { [weak self] text, type in
+                self?.showToast(text: text, type: type)
             }
-            if includeNoise && !transparent {
-                let ctx = UIGraphicsGetCurrentContext()
-                ctx?.saveGState()
-                ctx?.translateBy(x: margin, y: margin)
-                drawNoise(in: ctx!, rect: CGRect(origin: .zero, size: contentSize))
-                ctx?.restoreGState()
-            }
-            let ctx = UIGraphicsGetCurrentContext()!
-            ctx.saveGState()
-            ctx.translateBy(x: margin - contentOffset.x, y: margin - contentOffset.y)
-            drawStrokesForExport(in: ctx)
-            ctx.restoreGState()
-        }
-
-        guard let data = image.pngData() else {
-            let errorMessage = "Failed to generate PNG data"
-            sessionLogger.error("Export PNG data failed")
-            showToast(text: "Export failed", type: .error)
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-            return
-        }
-        let name = exportFileName(extension: "png")
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        do {
-            try data.write(to: tempURL, options: Data.WritingOptions.atomic)
-            presentShare(url: tempURL)
-            showToast(text: "PNG exported", type: .success)
-        } catch {
-            let errorMessage = "Failed to export PNG: \(error.localizedDescription)"
-            sessionLogger.error("Export PNG write failed: \(error.localizedDescription)")
-            showToast(text: "Export failed", type: .error)
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-        }
+        )
     }
 
     private func presentShare(url: URL) {
@@ -1022,54 +760,12 @@ private final class TapeCanvasUIView: UIView {
         undoStack.removeAll()
         telemetry = Telemetry()
         didShowSavedToastThisSession = false
-        try? FileManager.default.removeItem(at: SessionPersistence.sessionURL())
+        sessionManager.deleteSession()
         setNeedsDisplay()
     }
 
-    private func configureToast() {
-        toastLabel.textAlignment = .center
-        toastLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        toastLabel.layer.cornerRadius = DesignTokens.cornerRadiusMedium
-        toastLabel.layer.masksToBounds = true
-        toastLabel.alpha = 0
-        updateToastAppearance()
-        addSubview(toastLabel)
-    }
-
-    private func updateToastAppearance(for type: ToastType? = nil) {
-        let toastType = type ?? .info
-        toastLabel.textColor = toastType.textColor
-        toastLabel.backgroundColor = toastType.backgroundColor.resolvedColor(with: traitCollection)
-    }
-
     private func showToast(text: String, type: ToastType = .info) {
-        toastTimer?.invalidate()
-        toastLabel.text = text
-        updateToastAppearance(for: type)
-        bringSubviewToFront(toastLabel)
-        
-        // Animate based on type: error/warning get slight scale animation
-        let animationDuration: TimeInterval = 0.15
-        let scale: CGFloat = (type == .error || type == .warning) ? 1.05 : 1.0
-        
-        toastLabel.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-        toastLabel.alpha = 0
-        
-        UIView.animate(withDuration: DesignTokens.animationDurationFast, delay: 0, options: [.curveEaseOut]) {
-            self.toastLabel.alpha = 1
-            self.toastLabel.transform = CGAffineTransform(scaleX: scale, y: scale)
-        } completion: { _ in
-            UIView.animate(withDuration: DesignTokens.animationDurationFast * 0.67) {
-                self.toastLabel.transform = .identity
-            }
-        }
-        
-        toastTimer = Timer.scheduledTimer(withTimeInterval: Layout.toastVisibleDuration, repeats: false) { [weak self] _ in
-            UIView.animate(withDuration: DesignTokens.animationDurationMedium) {
-                self?.toastLabel.alpha = 0
-                self?.toastLabel.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-            }
-        }
+        toastManager.show(text: text, type: type)
     }
 
     private func findViewController() -> UIViewController? {
@@ -1095,13 +791,15 @@ private final class TapeCanvasUIView: UIView {
         configureMenuTriggerButton()
         _ = radialMenu
         radialMenu.syncPaletteIndex()
-        configureToast()
+        _ = toastManager // Initialize toast manager
         registerForAppLifecycle()
-        if shouldAutoloadOnLaunch() {
+        if sessionManager.shouldAutoloadOnLaunch() {
             loadSession()
         }
         applySavedBrushSettings()
-        startPeriodicSaveTimerIfNeeded()
+        sessionManager.startPeriodicSaveTimerIfNeeded { [weak self] in
+            self?.saveSession()
+        }
     }
 
     /// Applies brush color and line width from UserDefaults (set in Settings) so they persist across launches.
