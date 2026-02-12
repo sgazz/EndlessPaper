@@ -83,7 +83,7 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TapeCanvasUIView {
         let view = TapeCanvasUIView()
-        view.backgroundColor = UIColor(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, alpha: 1.0)
+        // Background color will be set by the view's backgroundColorTone property
         view.onRequestSettings = onRequestSettings
         onCanvasReady(view)
         return view
@@ -95,6 +95,37 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
 }
 
 private final class TapeCanvasUIView: UIView {
+    /// Centralized design tokens for consistent UI styling across the app.
+    private enum DesignTokens {
+        // Corner radius
+        static let cornerRadiusSmall: CGFloat = 8
+        static let cornerRadiusMedium: CGFloat = 10
+        static let cornerRadiusLarge: CGFloat = 12
+        static let cornerRadiusRound: CGFloat = 80 // For radial menu
+        
+        // Shadows
+        static let shadowOpacityLight: Float = 0.1
+        static let shadowOpacityMedium: Float = 0.25
+        static let shadowRadiusSmall: CGFloat = 2
+        static let shadowRadiusMedium: CGFloat = 10
+        static let shadowOffset: CGSize = CGSize(width: 0, height: 4)
+        
+        // Animations
+        static let animationDurationFast: TimeInterval = 0.15
+        static let animationDurationMedium: TimeInterval = 0.2
+        static let animationDurationSlow: TimeInterval = 0.3
+        static let springDamping: CGFloat = 0.72
+        static let springVelocity: CGFloat = 0.6
+        
+        /// Applies standard shadow styling to a view layer.
+        static func applyShadow(to layer: CALayer, opacity: Float = shadowOpacityLight, radius: CGFloat = shadowRadiusMedium) {
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOpacity = opacity
+            layer.shadowRadius = radius
+            layer.shadowOffset = shadowOffset
+        }
+    }
+
     private enum Layout {
         static let menuTriggerSize: CGFloat = 132
         static let menuTriggerMargin: CGFloat = 12
@@ -135,12 +166,42 @@ private final class TapeCanvasUIView: UIView {
     private var decelVelocity: CGFloat = 0
     private let decelRate: CGFloat = 0.92
     private let velocityStopThreshold: CGFloat = 4
-    private let backgroundColorTone = UIColor(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, alpha: 1.0)
+    /// Adaptive background color that responds to system dark mode.
+    private var backgroundColorTone: UIColor {
+        UIColor { traitCollection in
+            if traitCollection.userInterfaceStyle == .dark {
+                // Dark mode: dark gray background
+                UIColor(red: 28.0 / 255.0, green: 28.0 / 255.0, blue: 30.0 / 255.0, alpha: 1.0)
+            } else {
+                // Light mode: light beige background
+                UIColor(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, alpha: 1.0)
+            }
+        }
+    }
     private var baseStrokeColor: UIColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
-    private let graphiteColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
+    /// Adaptive graphite color for UI elements (lighter in dark mode for visibility).
+    private var graphiteColor: UIColor {
+        UIColor { traitCollection in
+            if traitCollection.userInterfaceStyle == .dark {
+                // Dark mode: lighter gray for visibility
+                UIColor(white: 0.85, alpha: 0.9)
+            } else {
+                // Light mode: dark graphite
+                UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
+            }
+        }
+    }
     private var baseLineWidth: CGFloat = Defaults.baseLineWidth
     private var isEraser: Bool = false
     private var noiseTile: UIImage?
+    /// Background layer for static background (performance optimization).
+    private lazy var backgroundLayer: CALayer = {
+        let layer = CALayer()
+        layer.zPosition = -1000
+        return layer
+    }()
+    /// Flag to track if redraw is needed (performance optimization).
+    private var needsRedraw: Bool = true
     private let primaryColorPalette: [UIColor] = [
         UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9),   // graphite
         UIColor(red: 0.12, green: 0.9, blue: 0.98, alpha: 0.95),   // neon cyan 2
@@ -181,6 +242,42 @@ private final class TapeCanvasUIView: UIView {
     private let toastLabel = UILabel()
     private var toastTimer: Timer?
     private let menuTriggerButton = UIButton(type: .custom)
+
+    /// Toast message types with distinct visual styles.
+    private enum ToastType {
+        case success
+        case error
+        case warning
+        case info
+
+        var backgroundColor: UIColor {
+            UIColor { traitCollection in
+                let isDark = traitCollection.userInterfaceStyle == .dark
+                switch self {
+                case .success:
+                    return isDark
+                        ? UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.95)
+                        : UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.95)
+                case .error:
+                    return isDark
+                        ? UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.95)
+                        : UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.95)
+                case .warning:
+                    return isDark
+                        ? UIColor(red: 0.95, green: 0.65, blue: 0.1, alpha: 0.95)
+                        : UIColor(red: 0.95, green: 0.65, blue: 0.1, alpha: 0.95)
+                case .info:
+                    return isDark
+                        ? UIColor(white: 0.2, alpha: 0.95)
+                        : UIColor(white: 0.95, alpha: 0.95)
+                }
+            }
+        }
+
+        var textColor: UIColor {
+            UIColor.white.withAlphaComponent(0.95)
+        }
+    }
     private let menuTriggerKeyX = "menuTrigger.center.x"
     private let menuTriggerKeyY = "menuTrigger.center.y"
     private lazy var radialMenu = RadialMenuController(
@@ -191,7 +288,7 @@ private final class TapeCanvasUIView: UIView {
         cycleLineWidth: { [weak self] in self?.cycleLineWidth() },
         onClearLastSession: { [weak self] in self?.confirmAndClearSession() },
         onExport: { [weak self] in self?.exportVisible() },
-        onSettings: { [weak self] in self?.onRequestSettings?() ?? self?.showToast(text: "Settings") },
+        onSettings: { [weak self] in self?.onRequestSettings?() ?? self?.showToast(text: "Settings", type: .info) },
         onSparkles: { [weak self] in self?.handleSparklesTap() },
         onPaletteIndexChanged: { [weak self] index in
             self?.applyPalette(index: index)
@@ -263,7 +360,9 @@ private final class TapeCanvasUIView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
+        guard needsRedraw, let context = UIGraphicsGetCurrentContext() else { return }
+        
+        // Draw noise texture on top of background layer
         drawNoise(in: context, rect: rect)
         context.setLineCap(.round)
         context.setLineJoin(.round)
@@ -279,6 +378,18 @@ private final class TapeCanvasUIView: UIView {
         if let stroke = currentStroke {
             drawStroke(stroke, in: context)
         }
+        
+        needsRedraw = false
+    }
+    
+    override func setNeedsDisplay() {
+        needsRedraw = true
+        super.setNeedsDisplay()
+    }
+    
+    override func setNeedsDisplay(_ rect: CGRect) {
+        needsRedraw = true
+        super.setNeedsDisplay(rect)
     }
 
     private func drawStroke(_ stroke: Stroke, in context: CGContext) {
@@ -574,11 +685,15 @@ private final class TapeCanvasUIView: UIView {
             if !didShowSavedToastThisSession {
                 didShowSavedToastThisSession = true
                 DispatchQueue.main.async { [weak self] in
-                    self?.showToast(text: "Saved")
+                    self?.showToast(text: "Saved", type: .success)
                 }
             }
         } catch {
+            let errorMessage = "Session save failed: \(error.localizedDescription)"
             sessionLogger.error("Session save failed: \(error.localizedDescription)")
+            DispatchQueue.main.async { [weak self] in
+                self?.showToast(text: "Save failed", type: .error)
+            }
         }
     }
 
@@ -607,6 +722,16 @@ private final class TapeCanvasUIView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // Update background color to adapt to dark mode
+        backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection)
+        
+        // Setup background layer for performance (static background)
+        if backgroundLayer.superlayer == nil {
+            layer.insertSublayer(backgroundLayer, at: 0)
+        }
+        backgroundLayer.frame = bounds
+        backgroundLayer.backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection).cgColor
+        
         segmentWidth = max(1, bounds.width * 1.5)
         updateSegmentsIfNeeded()
         radialMenu.layout(in: bounds)
@@ -617,6 +742,7 @@ private final class TapeCanvasUIView: UIView {
         menuTriggerButton.frame.size = CGSize(width: Layout.menuTriggerSize, height: Layout.menuTriggerSize)
         menuTriggerButton.center = clampMenuTrigger(point: loadMenuTriggerPosition() ?? defaultCenter)
         menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
+        updateMenuTriggerButtonAppearance()
         let toastWidth = min(bounds.width - Layout.toastHorizontalMargin, Layout.toastWidthMax)
         toastLabel.frame = CGRect(
             x: (bounds.width - toastWidth) / 2,
@@ -624,6 +750,21 @@ private final class TapeCanvasUIView: UIView {
             width: toastWidth,
             height: 36
         )
+        updateToastAppearance()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+            // Dark mode changed - update colors and redraw
+            backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection)
+            backgroundLayer.backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection).cgColor
+            noiseTile = nil // Invalidate noise tile cache to regenerate with new colors
+            updateMenuTriggerButtonAppearance()
+            updateToastAppearance()
+            radialMenu.updateColorsForDarkMode(graphiteColor: graphiteColor.resolvedColor(with: traitCollection))
+            setNeedsDisplay()
+        }
     }
 
     private func drawNoise(in context: CGContext, rect: CGRect) {
@@ -652,8 +793,10 @@ private final class TapeCanvasUIView: UIView {
 
     private func makeNoiseTile(size: CGFloat) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+        let resolvedBg = backgroundColorTone.resolvedColor(with: traitCollection)
+        let isDark = traitCollection.userInterfaceStyle == .dark
         return renderer.image { ctx in
-            let base = backgroundColorTone.withAlphaComponent(0.02)
+            let base = resolvedBg.withAlphaComponent(0.02)
             base.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
 
@@ -661,7 +804,10 @@ private final class TapeCanvasUIView: UIView {
                 let x = CGFloat.random(in: 0..<size)
                 let y = CGFloat.random(in: 0..<size)
                 let alpha = CGFloat.random(in: 0.015...0.05)
-                let dotColor = UIColor(white: 0.0, alpha: alpha)
+                // In dark mode, use lighter dots; in light mode, use darker dots
+                let dotColor = isDark
+                    ? UIColor(white: 1.0, alpha: alpha)
+                    : UIColor(white: 0.0, alpha: alpha)
                 ctx.cgContext.setFillColor(dotColor.cgColor)
                 ctx.cgContext.fillEllipse(in: CGRect(x: x, y: y, width: 1.2, height: 1.2))
             }
@@ -727,7 +873,7 @@ private final class TapeCanvasUIView: UIView {
             segments[last.segmentId] = segment
         }
         setNeedsDisplay()
-        showToast(text: "Undo")
+        showToast(text: "Undo", type: .warning)
     }
 
     private func exportVisible() {
@@ -774,9 +920,12 @@ private final class TapeCanvasUIView: UIView {
         do {
             try data.write(to: tempURL, options: Data.WritingOptions.atomic)
             presentShare(url: tempURL)
+            showToast(text: "PDF exported", type: .success)
         } catch {
-            sessionLogger.error("Export write failed: \(error.localizedDescription)")
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            let errorMessage = "Failed to export PDF: \(error.localizedDescription)"
+            sessionLogger.error("Export PDF write failed: \(error.localizedDescription)")
+            showToast(text: "Export failed", type: .error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
     }
 
@@ -816,8 +965,10 @@ private final class TapeCanvasUIView: UIView {
         }
 
         guard let data = image.pngData() else {
+            let errorMessage = "Failed to generate PNG data"
             sessionLogger.error("Export PNG data failed")
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showToast(text: "Export failed", type: .error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
             return
         }
         let name = exportFileName(extension: "png")
@@ -825,9 +976,12 @@ private final class TapeCanvasUIView: UIView {
         do {
             try data.write(to: tempURL, options: Data.WritingOptions.atomic)
             presentShare(url: tempURL)
+            showToast(text: "PNG exported", type: .success)
         } catch {
-            sessionLogger.error("Export write failed: \(error.localizedDescription)")
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            let errorMessage = "Failed to export PNG: \(error.localizedDescription)"
+            sessionLogger.error("Export PNG write failed: \(error.localizedDescription)")
+            showToast(text: "Export failed", type: .error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
     }
 
@@ -850,7 +1004,7 @@ private final class TapeCanvasUIView: UIView {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
             self?.clearLastDrawingSession()
-            self?.showToast(text: "Current session cleared.")
+            self?.showToast(text: "Session cleared", type: .warning)
         })
         if let popover = alert.popoverPresentationController {
             popover.sourceView = self
@@ -875,24 +1029,45 @@ private final class TapeCanvasUIView: UIView {
     private func configureToast() {
         toastLabel.textAlignment = .center
         toastLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        toastLabel.textColor = UIColor(white: 0.1, alpha: 0.9)
-        toastLabel.backgroundColor = backgroundColorTone.withAlphaComponent(0.92)
-        toastLabel.layer.cornerRadius = 10
+        toastLabel.layer.cornerRadius = DesignTokens.cornerRadiusMedium
         toastLabel.layer.masksToBounds = true
         toastLabel.alpha = 0
+        updateToastAppearance()
         addSubview(toastLabel)
     }
 
-    private func showToast(text: String) {
+    private func updateToastAppearance(for type: ToastType? = nil) {
+        let toastType = type ?? .info
+        toastLabel.textColor = toastType.textColor
+        toastLabel.backgroundColor = toastType.backgroundColor.resolvedColor(with: traitCollection)
+    }
+
+    private func showToast(text: String, type: ToastType = .info) {
         toastTimer?.invalidate()
         toastLabel.text = text
+        updateToastAppearance(for: type)
         bringSubviewToFront(toastLabel)
-        UIView.animate(withDuration: 0.15) {
+        
+        // Animate based on type: error/warning get slight scale animation
+        let animationDuration: TimeInterval = 0.15
+        let scale: CGFloat = (type == .error || type == .warning) ? 1.05 : 1.0
+        
+        toastLabel.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+        toastLabel.alpha = 0
+        
+        UIView.animate(withDuration: DesignTokens.animationDurationFast, delay: 0, options: [.curveEaseOut]) {
             self.toastLabel.alpha = 1
+            self.toastLabel.transform = CGAffineTransform(scaleX: scale, y: scale)
+        } completion: { _ in
+            UIView.animate(withDuration: DesignTokens.animationDurationFast * 0.67) {
+                self.toastLabel.transform = .identity
+            }
         }
+        
         toastTimer = Timer.scheduledTimer(withTimeInterval: Layout.toastVisibleDuration, repeats: false) { [weak self] _ in
-            UIView.animate(withDuration: 0.2) {
+            UIView.animate(withDuration: DesignTokens.animationDurationMedium) {
                 self?.toastLabel.alpha = 0
+                self?.toastLabel.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
             }
         }
     }
@@ -965,7 +1140,7 @@ private final class TapeCanvasUIView: UIView {
         radialMenu.updateColorPalette(palette)
         if let lastPaletteIndex, lastPaletteIndex != index {
             let message = index == 0 ? "Original colors restored" : "New colors unlocked"
-            showToast(text: message)
+            showToast(text: message, type: .success)
         }
         lastPaletteIndex = index
     }
@@ -998,8 +1173,32 @@ private final class TapeCanvasUIView: UIView {
         defaults.set(menuTriggerButton.center.y, forKey: menuTriggerKeyY)
     }
 
+    // MARK: - Accessibility (Canvas)
+
+    override var isAccessibilityElement: Bool {
+        get { true }
+        // This view represents the interactive drawing canvas; ignore external setters.
+        set { }
+    }
+
+    override var accessibilityLabel: String? {
+        get { "Infinity Paper canvas" }
+        set { }
+    }
+
+    override var accessibilityHint: String? {
+        get {
+            "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools."
+        }
+        set { }
+    }
+
+    override var accessibilityTraits: UIAccessibilityTraits {
+        get { [.allowsDirectInteraction, .updatesFrequently] }
+        set { }
+    }
+
     private func configureMenuTriggerButton() {
-        menuTriggerButton.backgroundColor = UIColor.white.withAlphaComponent(0.08)
         menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
         menuTriggerButton.layer.shadowColor = nil
         menuTriggerButton.layer.shadowOpacity = 0
@@ -1011,16 +1210,32 @@ private final class TapeCanvasUIView: UIView {
             menuTriggerButton.imageView?.contentMode = .scaleAspectFit
         } else {
             menuTriggerButton.setTitle("∞", for: .normal)
-            menuTriggerButton.setTitleColor(UIColor.black.withAlphaComponent(0.8), for: .normal)
-            menuTriggerButton.titleLabel?.font = UIFont.systemFont(ofSize: 36, weight: .medium)
+            menuTriggerButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .largeTitle)
+            menuTriggerButton.titleLabel?.adjustsFontForContentSizeCategory = true
         }
         menuTriggerButton.accessibilityLabel = "Open radial menu"
+        menuTriggerButton.accessibilityHint = "Double-tap to open the radial menu. Drag to move the button."
+        menuTriggerButton.accessibilityTraits.insert(.button)
         menuTriggerButton.addAction(UIAction { [weak self] _ in
             self?.showMenuAtCenter()
         }, for: .touchUpInside)
         menuTriggerButton.addGestureRecognizer(menuTriggerPan)
         menuTriggerButton.isUserInteractionEnabled = true
+        updateMenuTriggerButtonAppearance()
         addSubview(menuTriggerButton)
+    }
+
+    private func updateMenuTriggerButtonAppearance() {
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        menuTriggerButton.backgroundColor = isDark
+            ? UIColor.white.withAlphaComponent(0.12)
+            : UIColor.white.withAlphaComponent(0.08)
+        if menuTriggerButton.title(for: .normal) != nil {
+            menuTriggerButton.setTitleColor(
+                isDark ? UIColor.white.withAlphaComponent(0.9) : UIColor.black.withAlphaComponent(0.8),
+                for: .normal
+            )
+        }
     }
 
     @objc private func handleMenuTriggerPan(_ recognizer: UIPanGestureRecognizer) {

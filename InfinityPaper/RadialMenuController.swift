@@ -2,7 +2,7 @@ import UIKit
 
 final class RadialMenuController {
     private unowned let host: UIView
-    private let graphiteColor: UIColor
+    private var graphiteColor: UIColor
     private var colorSubPalette: [UIColor]
     private let setBaseStrokeColor: (UIColor) -> Void
     private let cycleLineWidth: () -> Void
@@ -146,6 +146,21 @@ final class RadialMenuController {
 
     var isMenuVisible: Bool {
         !menuView.isHidden || !colorMenuView.isHidden
+    }
+
+    /// Updates button colors for dark mode. Called when trait collection changes.
+    func updateColorsForDarkMode(graphiteColor: UIColor) {
+        self.graphiteColor = graphiteColor
+        // Update all button tint colors
+        colorButton.tintColor = graphiteColor
+        widthButton.tintColor = graphiteColor
+        eraserButton.tintColor = graphiteColor
+        exportButton.tintColor = graphiteColor
+        settingsButton.tintColor = graphiteColor
+        sparklesButton.tintColor = graphiteColor
+        // Update color button icon
+        colorButton.setImage(makeColorDotsIcon(), for: .normal)
+        widthButton.setImage(makeLineWidthIcon(), for: .normal)
     }
 
     func showMenuAtCenter() {
