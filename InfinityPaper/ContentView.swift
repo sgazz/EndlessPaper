@@ -5,7 +5,6 @@
 //  Created by Gazza on 17. 1. 2026..
 //
 
-import os
 import SwiftUI
 
 struct ContentView: View {
@@ -20,13 +19,12 @@ struct ContentView: View {
 
 private struct TapeCanvasView: View {
     @State private var showAbout = false
-    @State private var canvasView: TapeCanvasUIView?
 
     var body: some View {
         ZStack {
             TapeCanvasRepresentable(
                 onRequestSettings: { DispatchQueue.main.async { showAbout = true } },
-                onCanvasReady: { view in DispatchQueue.main.async { canvasView = view } }
+                onCanvasReady: { _ in }
             )
             .ignoresSafeArea()
         }
@@ -230,11 +228,7 @@ private final class TapeCanvasUIView: UIView {
     func loadSessionFromSettings() { loadSession(); setNeedsDisplay() }
     /// Called from Settings: reset trigger button and radial menu position to default (top‑left area).
     func resetRadialMenuPositionFromSettings() {
-        let defaultCenter = CGPoint(
-            x: safeAreaInsets.left + Layout.menuTriggerMargin + Layout.menuTriggerSize / 2,
-            y: safeAreaInsets.top + Layout.menuTriggerMargin + Layout.menuTriggerSize / 2
-        )
-        let clamped = clampMenuTrigger(point: defaultCenter)
+        let clamped = clampMenuTrigger(point: defaultMenuTriggerCenter())
         menuTriggerButton.center = clamped
         saveMenuTriggerPosition()
         radialMenu.setMenuCenterAndSave(clamped)
@@ -535,12 +529,8 @@ private final class TapeCanvasUIView: UIView {
         segmentWidth = max(1, bounds.width * 1.5)
         updateSegmentsIfNeeded()
         radialMenu.layout(in: bounds)
-        let defaultCenter = CGPoint(
-            x: safeAreaInsets.left + Layout.menuTriggerMargin + Layout.menuTriggerSize / 2,
-            y: safeAreaInsets.top + Layout.menuTriggerMargin + Layout.menuTriggerSize / 2
-        )
         menuTriggerButton.frame.size = CGSize(width: Layout.menuTriggerSize, height: Layout.menuTriggerSize)
-        menuTriggerButton.center = clampMenuTrigger(point: loadMenuTriggerPosition() ?? defaultCenter)
+        menuTriggerButton.center = clampMenuTrigger(point: loadMenuTriggerPosition() ?? defaultMenuTriggerCenter())
         menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
         updateMenuTriggerButtonAppearance()
         toastManager.updateLayout(in: bounds)
@@ -781,6 +771,14 @@ private final class TapeCanvasUIView: UIView {
             showToast(text: message, type: .success)
         }
         lastPaletteIndex = index
+    }
+
+    /// Default center for the menu trigger button (top‑left area from safe area).
+    private func defaultMenuTriggerCenter() -> CGPoint {
+        CGPoint(
+            x: safeAreaInsets.left + Layout.menuTriggerMargin + Layout.menuTriggerSize / 2,
+            y: safeAreaInsets.top + Layout.menuTriggerMargin + Layout.menuTriggerSize / 2
+        )
     }
 
     private func clampMenuTrigger(point: CGPoint) -> CGPoint {

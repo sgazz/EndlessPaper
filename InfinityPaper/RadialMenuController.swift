@@ -94,12 +94,9 @@ final class RadialMenuController {
         return defaults.bool(forKey: Self.verboseA11yKey)
     }
 
-    // Animation (base values; effective durations use effectiveShowDuration / effectiveHideDuration)
+    // Animation (effective durations come from effectiveShowDuration / effectiveHideDuration / effectiveStaggerDelay)
     private let menuSpringDamping: CGFloat = 0.72
     private let menuSpringVelocity: CGFloat = 0.6
-    private let menuShowDuration: TimeInterval = 0.42
-    private let menuHideDuration: TimeInterval = 0.28
-    private let buttonStaggerDelay: TimeInterval = 0.032
     private let buttonInitialScale: CGFloat = 0.4
     private let menuInitialScale: CGFloat = 0.88
 
@@ -272,17 +269,22 @@ final class RadialMenuController {
         colorButton.setImage(makeColorDotsIcon(), for: .normal)
     }
 
+    /// Shared setup for radial menu container (main menu and color submenu).
+    private func applyMenuViewStyle(_ view: UIView, zPosition: CGFloat) {
+        view.backgroundColor = .clear
+        view.layer.cornerRadius = MenuLayout.menuCornerRadius
+        view.layer.shadowColor = UIColor.black.cgColor
+        view.layer.shadowOpacity = 0.1
+        view.layer.shadowRadius = 10
+        view.layer.shadowOffset = CGSize(width: 0, height: 4)
+        view.layer.zPosition = zPosition
+        view.layer.borderWidth = 0
+        view.isHidden = true
+        view.isUserInteractionEnabled = true
+    }
+
     private func configureMenu() {
-        menuView.backgroundColor = .clear
-        menuView.layer.cornerRadius = MenuLayout.menuCornerRadius
-        menuView.layer.shadowColor = UIColor.black.cgColor
-        menuView.layer.shadowOpacity = 0.1
-        menuView.layer.shadowRadius = 10
-        menuView.layer.shadowOffset = CGSize(width: 0, height: 4)
-        menuView.layer.zPosition = 1000
-        menuView.layer.borderWidth = 0
-        menuView.isHidden = true
-        menuView.isUserInteractionEnabled = true
+        applyMenuViewStyle(menuView, zPosition: 1000)
 
         configureTapButton(
             colorButton,
@@ -335,16 +337,7 @@ final class RadialMenuController {
     }
 
     private func configureColorMenu() {
-        colorMenuView.backgroundColor = .clear
-        colorMenuView.layer.cornerRadius = MenuLayout.menuCornerRadius
-        colorMenuView.layer.shadowColor = UIColor.black.cgColor
-        colorMenuView.layer.shadowOpacity = 0.1
-        colorMenuView.layer.shadowRadius = 10
-        colorMenuView.layer.shadowOffset = CGSize(width: 0, height: 4)
-        colorMenuView.layer.zPosition = 1001
-        colorMenuView.layer.borderWidth = 0
-        colorMenuView.isHidden = true
-        colorMenuView.isUserInteractionEnabled = true
+        applyMenuViewStyle(colorMenuView, zPosition: 1001)
 
         colorButtons = colorSubPalette.enumerated().map { index, color in
             let button = UIButton(type: .system)
@@ -526,20 +519,15 @@ final class RadialMenuController {
         [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton]
     }
 
-    private func showColorMenu() {
-        menuView.isHidden = true
-        colorMenuView.isHidden = false
-        host.bringSubviewToFront(colorMenuView)
-        layout(in: host.bounds)
-
+    /// Runs the shared reveal animation for a menu container and its buttons.
+    private func animateMenuReveal(view: UIView, buttons: [UIButton]) {
         let scale = effectiveRadialScale
-        colorMenuView.alpha = 0
-        colorMenuView.transform = CGAffineTransform(scaleX: menuInitialScale * scale, y: menuInitialScale * scale)
-        colorButtons.forEach {
+        view.alpha = 0
+        view.transform = CGAffineTransform(scaleX: menuInitialScale * scale, y: menuInitialScale * scale)
+        buttons.forEach {
             $0.transform = CGAffineTransform(scaleX: buttonInitialScale, y: buttonInitialScale)
             $0.alpha = 0
         }
-
         UIView.animate(
             withDuration: effectiveShowDuration,
             delay: 0,
@@ -547,11 +535,10 @@ final class RadialMenuController {
             initialSpringVelocity: menuSpringVelocity,
             options: [.allowUserInteraction]
         ) {
-            self.colorMenuView.alpha = 1
-            self.colorMenuView.transform = CGAffineTransform(scaleX: scale, y: scale)
+            view.alpha = 1
+            view.transform = CGAffineTransform(scaleX: scale, y: scale)
         }
-
-        colorButtons.enumerated().forEach { index, button in
+        buttons.enumerated().forEach { index, button in
             UIView.animate(
                 withDuration: effectiveShowDuration * 0.85,
                 delay: Double(index) * effectiveStaggerDelay,
@@ -565,6 +552,14 @@ final class RadialMenuController {
         }
     }
 
+    private func showColorMenu() {
+        menuView.isHidden = true
+        colorMenuView.isHidden = false
+        host.bringSubviewToFront(colorMenuView)
+        layout(in: host.bounds)
+        animateMenuReveal(view: colorMenuView, buttons: colorButtons)
+    }
+
     private func hideMenuAfterSelection() {
         hideMenu(animated: true)
     }
@@ -575,37 +570,7 @@ final class RadialMenuController {
         layout(in: host.bounds)
 
         if animated {
-            let scale = effectiveRadialScale
-            menuView.alpha = 0
-            menuView.transform = CGAffineTransform(scaleX: menuInitialScale * scale, y: menuInitialScale * scale)
-            mainMenuButtons.forEach {
-                $0.transform = CGAffineTransform(scaleX: buttonInitialScale, y: buttonInitialScale)
-                $0.alpha = 0
-            }
-
-            UIView.animate(
-                withDuration: effectiveShowDuration,
-                delay: 0,
-                usingSpringWithDamping: menuSpringDamping,
-                initialSpringVelocity: menuSpringVelocity,
-                options: [.allowUserInteraction]
-            ) {
-                self.menuView.alpha = 1
-                self.menuView.transform = CGAffineTransform(scaleX: scale, y: scale)
-            }
-
-            mainMenuButtons.enumerated().forEach { index, button in
-                UIView.animate(
-                    withDuration: effectiveShowDuration * 0.85,
-                    delay: Double(index) * effectiveStaggerDelay,
-                    usingSpringWithDamping: menuSpringDamping,
-                    initialSpringVelocity: menuSpringVelocity,
-                    options: [.allowUserInteraction]
-                ) {
-                    button.transform = .identity
-                    button.alpha = 1
-                }
-            }
+            animateMenuReveal(view: menuView, buttons: mainMenuButtons)
         } else {
             let scale = effectiveRadialScale
             menuView.alpha = 1
