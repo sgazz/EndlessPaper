@@ -36,6 +36,18 @@
 "toolbar.clear_confirm_action" = "Clear";
 "toolbar.drag_a11y" = "Move toolbar";
 "toolbar.drag_a11y_hint" = "Drag the toolbar across the screen; release near an edge to dock it. Short taps still use the buttons.";
+"toolbar.infinity_a11y" = "Infinity";
+"toolbar.infinity_a11y_hint" = "Opens a compact menu for canvas and view actions.";
+"toolbar.infinity_clear" = "Clear canvas…";
+"toolbar.infinity_new_space" = "New space…";
+"toolbar.infinity_center" = "Center view";
+"toolbar.infinity_focus" = "Focus mode";
+"toolbar.new_space_confirm_title" = "Start a new space?";
+"toolbar.new_space_confirm_message" = "This clears the canvas and resets scroll to the beginning. You can’t undo this.";
+"toolbar.new_space_confirm_action" = "Clear and reset";
+"toolbar.focus_show_tools" = "Show tools";
+"toast.new_space" = "Fresh space.";
+"toast.view_centered" = "Centered on your drawing.";
 
 "accessibility.canvas_hint_toolbar" = "Two-finger pan to move the tape. Use the edge toolbar for colors, line width, undo, export, and settings. Drag the toolbar toward another edge to dock it; along the left or right edge it turns vertical.";
 "accessibility.canvas_hint_radial" = "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools.";

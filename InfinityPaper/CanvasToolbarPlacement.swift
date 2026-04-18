@@ -21,6 +21,24 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
         self == .leading || self == .trailing
     }
 
+    /// `toolbarMeasuredSize` can briefly (or rarely) reflect the wrong orientation (e.g. default 340×52 while the bar is vertical).
+    /// Side docking must use the **narrow** extent for X math and the **tall** extent for consistency with `nearestDock`.
+    static func orientedToolbarSize(_ size: CGSize, dock: CanvasToolbarDock) -> CGSize {
+        let w = size.width
+        let h = size.height
+        if dock.usesVerticalToolbarLayout {
+            if w > h, w > 100 {
+                return CGSize(width: h, height: w)
+            }
+            return size
+        } else {
+            if h > w, h > 100 {
+                return CGSize(width: h, height: w)
+            }
+            return size
+        }
+    }
+
     /// Center of the toolbar when docked to this edge (`toolbarSize` should match current horizontal vs vertical layout).
     /// - `topBottomMargin`: breathing room from top/bottom safe inset (unchanged feel for horizontal dock).
     /// - `sideDockMargin`: small gap from leading/trailing safe inset so vertical docks hug the edge without clipping.
@@ -31,8 +49,9 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
         topBottomMargin: CGFloat,
         sideDockMargin: CGFloat
     ) -> CGPoint {
-        let w = toolbarSize.width
-        let h = toolbarSize.height
+        let s = Self.orientedToolbarSize(toolbarSize, dock: self)
+        let w = s.width
+        let h = s.height
         let midX = containerSize.width / 2
         let midY = containerSize.height / 2
 

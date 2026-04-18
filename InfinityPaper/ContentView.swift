@@ -36,6 +36,8 @@ private struct TapeCanvasView: View {
     @State private var dragTranslation: CGSize = .zero
     @State private var toolbarMeasuredSize: CGSize = ToolbarSizePreferenceKey.defaultValue
     @State private var showClearCanvasConfirmation = false
+    @State private var showNewSpaceConfirmation = false
+    @State private var chromeHiddenForFocus = false
 
     private var toolbarDock: CanvasToolbarDock {
         CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
@@ -43,8 +45,8 @@ private struct TapeCanvasView: View {
 
     /// Top/bottom dock: balanced offset from safe area (unchanged feel).
     private let toolbarTopBottomMargin: CGFloat = 11
-    /// Leading/trailing dock: tighter so the vertical strip reads as “on the edge” (still inside safe area).
-    private let toolbarSideDockMargin: CGFloat = 7
+    /// Leading/trailing dock: small inset after safe area (typically ~8–10 pt to visible edge on phones).
+    private let toolbarSideDockMargin: CGFloat = 4
     private let toolbarHintReserve: CGFloat = 56
 
     var body: some View {
@@ -88,14 +90,14 @@ private struct TapeCanvasView: View {
                         .padding(.bottom, pad.bottom + 8)
                         .padding(.leading, pad.leading)
                         .padding(.trailing, pad.trailing)
-                        .opacity(orientationHintOpacity)
-                        .allowsHitTesting(true)
+                        .opacity(chromeHiddenForFocus ? 0 : orientationHintOpacity)
+                        .allowsHitTesting(!chromeHiddenForFocus)
                         .transition(.opacity)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .allowsHitTesting(true)
+            .allowsHitTesting(!chromeHiddenForFocus)
 
             GeometryReader { geo in
                 let safe = geo.safeAreaInsets
@@ -139,6 +141,27 @@ private struct TapeCanvasView: View {
                         onRequestClearCanvas: {
                             DispatchQueue.main.async {
                                 showClearCanvasConfirmation = true
+                            }
+                        },
+                        onInfinityClearCanvas: {
+                            DispatchQueue.main.async {
+                                showClearCanvasConfirmation = true
+                            }
+                        },
+                        onInfinityNewSpace: {
+                            DispatchQueue.main.async {
+                                showNewSpaceConfirmation = true
+                            }
+                        },
+                        onInfinityCenterView: {
+                            DispatchQueue.main.async {
+                                toolbarBroker.canvas?.toolbarCenterViewOnContent()
+                                toolbarBroker.syncFromCanvas()
+                            }
+                        },
+                        onInfinityFocusMode: {
+                            withAnimation(.easeOut(duration: 0.28)) {
+                                chromeHiddenForFocus = true
                             }
                         }
                     )
@@ -188,7 +211,26 @@ private struct TapeCanvasView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .coordinateSpace(name: "toolbarDockSpace")
-            .allowsHitTesting(true)
+            .opacity(chromeHiddenForFocus ? 0 : 1)
+            .allowsHitTesting(!chromeHiddenForFocus)
+        }
+        .overlay(alignment: .bottom) {
+            if chromeHiddenForFocus {
+                Button {
+                    withAnimation(.easeOut(duration: 0.28)) {
+                        chromeHiddenForFocus = false
+                    }
+                } label: {
+                    Text(String(localized: "toolbar.focus_show_tools"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .padding(.bottom, 28)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .onPreferenceChange(ToolbarSizePreferenceKey.self) { toolbarMeasuredSize = $0 }
         .confirmationDialog(
@@ -203,6 +245,19 @@ private struct TapeCanvasView: View {
             Button(String(localized: "action.cancel"), role: .cancel) {}
         } message: {
             Text(String(localized: "toolbar.clear_confirm_message"))
+        }
+        .confirmationDialog(
+            String(localized: "toolbar.new_space_confirm_title"),
+            isPresented: $showNewSpaceConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "toolbar.new_space_confirm_action"), role: .destructive) {
+                toolbarBroker.canvas?.toolbarPerformNewSpace()
+                toolbarBroker.syncFromCanvas()
+            }
+            Button(String(localized: "action.cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "toolbar.new_space_confirm_message"))
         }
         .sheet(isPresented: $showAbout) {
             AboutView(onDismiss: { showAbout = false })
@@ -378,16 +433,32 @@ final class TapeCanvasUIView: UIView {
     private var noiseTile: UIImage?
     /// Flag to track if redraw is needed (performance optimization).
     private var needsRedraw: Bool = true
-    /// Muted, paper-friendly hues (first slot keeps dark-mode “paper ink” behavior).
+    /// Single curated palette: calm canvas, high-energy strokes (slot 0 → white in dark mode for “paper ink”).
     private let primaryColorPalette: [UIColor] = [
-        UIColor(red: 0.18, green: 0.18, blue: 0.19, alpha: 0.92),   // graphite #2E2E30
-        UIColor(red: 0.33, green: 0.40, blue: 0.48, alpha: 0.93),   // slate blue #54667A
-        UIColor(red: 0.22, green: 0.42, blue: 0.44, alpha: 0.93),   // deep teal #386B70
-        UIColor(red: 0.28, green: 0.44, blue: 0.34, alpha: 0.93),   // forest green #477056
-        UIColor(red: 0.62, green: 0.38, blue: 0.30, alpha: 0.93),   // terracotta #9E614D
-        UIColor(red: 0.62, green: 0.44, blue: 0.48, alpha: 0.93),   // dusty rose #9E707A
-        UIColor(red: 0.45, green: 0.38, blue: 0.54, alpha: 0.93),   // muted purple #73618A
-        UIColor(red: 0.48, green: 0.42, blue: 0.36, alpha: 0.92)    // warm umber #7A6B5C
+        // Strong neutrals (balance + fine lines on light paper)
+        UIColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 0.96), // #1A1A1F deep ink
+        UIColor(red: 0.24, green: 0.27, blue: 0.34, alpha: 0.95), // #3D4557 cool graphite
+        // Purple / violet (brand spine)
+        UIColor(red: 0.58, green: 0.20, blue: 1.00, alpha: 0.96), // #9433FF electric violet
+        UIColor(red: 0.43, green: 0.16, blue: 0.85, alpha: 0.96), // #6E29D9 royal purple
+        UIColor(red: 0.72, green: 0.28, blue: 0.98, alpha: 0.95), // #B847FA vivid orchid
+        // Magenta / pink
+        UIColor(red: 1.00, green: 0.14, blue: 0.62, alpha: 0.96), // #FF249E neon magenta
+        UIColor(red: 1.00, green: 0.35, blue: 0.78, alpha: 0.95), // #FF59C7 vivid pink
+        // Warm accents
+        UIColor(red: 1.00, green: 0.32, blue: 0.38, alpha: 0.96), // #FF5261 hot coral
+        UIColor(red: 1.00, green: 0.48, blue: 0.08, alpha: 0.96), // #FF7A14 bright orange
+        UIColor(red: 1.00, green: 0.76, blue: 0.12, alpha: 0.95), // #FFC21F electric amber
+        // Greens
+        UIColor(red: 0.55, green: 1.00, blue: 0.22, alpha: 0.95), // #8CFF38 acid lime
+        UIColor(red: 0.12, green: 0.94, blue: 0.48, alpha: 0.96), // #1EF07A neon spring
+        // Cyans / teals / blues
+        UIColor(red: 0.02, green: 0.86, blue: 0.78, alpha: 0.96), // #05DBC7 neon teal
+        UIColor(red: 0.05, green: 0.92, blue: 1.00, alpha: 0.96), // #0DEBFF bright cyan
+        UIColor(red: 0.14, green: 0.55, blue: 1.00, alpha: 0.96), // #248CFF laser blue
+        UIColor(red: 0.32, green: 0.62, blue: 1.00, alpha: 0.95), // #519EFF sky laser
+        // Extra depth without mud
+        UIColor(red: 0.18, green: 0.95, blue: 1.00, alpha: 0.94) // #2EF2FF aqua pop
     ]
     private let achievementColorPalette: [UIColor] = [
         UIColor(red: 0.65, green: 0.77, blue: 0.95, alpha: 0.95),  // pastel blue
@@ -483,6 +554,29 @@ final class TapeCanvasUIView: UIView {
     func toolbarClearCanvasConfirmed() {
         clearLastDrawingSession()
         showToast(text: NSLocalizedString("toast.session_cleared", comment: "Session cleared"), type: .warning)
+    }
+
+    /// Clears the session, resets horizontal scroll to origin, and nudges the user gently.
+    func toolbarPerformNewSpace() {
+        clearLastDrawingSession()
+        contentOffset = .zero
+        setNeedsDisplay()
+        postToolbarStateChange()
+        showToast(text: NSLocalizedString("toast.new_space", comment: "Fresh space"), type: .info)
+    }
+
+    /// Scrolls so the current drawing (if any) is roughly centered in the viewport.
+    func toolbarCenterViewOnContent() {
+        guard bounds.width > 1 else { return }
+        if let rect = sessionState.rawWorldBoundingRect(currentStroke: currentStroke) {
+            let midX = rect.midX
+            contentOffset.x = midX - bounds.width * 0.5
+        } else {
+            contentOffset = .zero
+        }
+        setNeedsDisplay()
+        postToolbarStateChange()
+        showToast(text: NSLocalizedString("toast.view_centered", comment: "View centered"), type: .info)
     }
     /// Called from Settings: load the last saved session.
     func loadSessionFromSettings() {

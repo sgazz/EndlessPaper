@@ -198,6 +198,104 @@ private struct ToolbarLineWidthPickerBody: View {
     }
 }
 
+// MARK: - Infinity brand menu (popover)
+
+private struct InfinityToolbarPopover: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let isPad: Bool
+    let onClearCanvas: () -> Void
+    let onNewSpace: () -> Void
+    let onCenterView: () -> Void
+    let onFocusMode: () -> Void
+
+    private var fill: Color {
+        Color(uiColor: UIColor { traits in
+            if traits.userInterfaceStyle == .dark {
+                UIColor(white: 0.11, alpha: 0.97)
+            } else {
+                UIColor(red: 0.99, green: 0.98, blue: 0.99, alpha: 0.98)
+            }
+        })
+    }
+
+    private var stroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.07)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            infinityRow(
+                titleKey: "toolbar.infinity_clear",
+                systemImage: "paintbrush.pointed.fill",
+                isDestructive: true,
+                action: onClearCanvas
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_new_space",
+                systemImage: "square.dashed",
+                isDestructive: false,
+                action: onNewSpace
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_center",
+                systemImage: "scope",
+                isDestructive: false,
+                action: onCenterView
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_focus",
+                systemImage: "moon.stars",
+                isDestructive: false,
+                action: onFocusMode
+            )
+        }
+        .frame(minWidth: isPad ? 220 : 196)
+        .padding(.vertical, isPad ? 6 : 4)
+        .background(
+            RoundedRectangle(cornerRadius: isPad ? 16 : 14, style: .continuous)
+                .fill(fill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: isPad ? 16 : 14, style: .continuous)
+                        .stroke(stroke, lineWidth: 0.5)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 10, y: 4)
+    }
+
+    private var divider: some View {
+        Divider()
+            .padding(.leading, isPad ? 44 : 40)
+    }
+
+    @ViewBuilder
+    private func infinityRow(titleKey: String, systemImage: String, isDestructive: Bool, action: @escaping () -> Void) -> some View {
+        let label = HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: isPad ? 16 : 15, weight: .medium))
+                .foregroundStyle(isDestructive ? Color.red.opacity(0.85) : Color.primary.opacity(0.55))
+                .frame(width: 24, alignment: .center)
+            Text(NSLocalizedString(titleKey, comment: ""))
+                .font(.system(size: isPad ? 16 : 15, weight: .medium))
+                .foregroundStyle(isDestructive ? Color.primary : Color.primary.opacity(0.88))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, isPad ? 16 : 14)
+        .padding(.vertical, isPad ? 12 : 10)
+        .contentShape(Rectangle())
+
+        if isDestructive {
+            Button(role: .destructive, action: action) { label }
+                .buttonStyle(.plain)
+        } else {
+            Button(action: action) { label }
+                .buttonStyle(.plain)
+        }
+    }
+}
+
 // MARK: - Floating toolbar
 
 struct CanvasFloatingToolbar: View {
@@ -214,9 +312,17 @@ struct CanvasFloatingToolbar: View {
     var onSettings: () -> Void
     var onMoreAbout: () -> Void
     var onRequestClearCanvas: () -> Void
+    var onInfinityClearCanvas: () -> Void
+    var onInfinityNewSpace: () -> Void
+    var onInfinityCenterView: () -> Void
+    var onInfinityFocusMode: () -> Void
 
     @State private var showColorPicker = false
     @State private var showWidthPicker = false
+    @State private var showInfinityMenu = false
+
+    /// Brand purple (∞ Paper identity).
+    private static let infinityBrand = Color(red: 157 / 255, green: 66 / 255, blue: 240 / 255)
 
     private var isPad: Bool {
         UIDevice.current.userInterfaceIdiom == .pad || horizontalSizeClass == .regular
@@ -413,5 +519,52 @@ struct CanvasFloatingToolbar: View {
         .menuStyle(.button)
         .tint(iconTint)
         .accessibilityLabel(Text(String(localized: "toolbar.more")))
+        .padding(.trailing, isVertical ? 0 : 4)
+
+        Button {
+            showColorPicker = false
+            showWidthPicker = false
+            showInfinityMenu = true
+        } label: {
+            Text("∞")
+                .font(.system(size: isPad ? 22 : 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(Self.infinityBrand)
+                .frame(width: iconFrame, height: iconFrame)
+                .background(
+                    Circle()
+                        .fill(Self.infinityBrand.opacity(colorScheme == .dark ? 0.22 : 0.14))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Self.infinityBrand.opacity(0.28), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "toolbar.infinity_a11y")))
+        .accessibilityHint(Text(String(localized: "toolbar.infinity_a11y_hint")))
+        .padding(.trailing, isVertical ? 0 : 2)
+        .padding(.bottom, isVertical ? 4 : 0)
+        .popover(isPresented: $showInfinityMenu, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
+            InfinityToolbarPopover(
+                isPad: isPad,
+                onClearCanvas: {
+                    showInfinityMenu = false
+                    onInfinityClearCanvas()
+                },
+                onNewSpace: {
+                    showInfinityMenu = false
+                    onInfinityNewSpace()
+                },
+                onCenterView: {
+                    showInfinityMenu = false
+                    onInfinityCenterView()
+                },
+                onFocusMode: {
+                    showInfinityMenu = false
+                    onInfinityFocusMode()
+                }
+            )
+            .presentationCompactAdaptation(.popover)
+        }
     }
 }
