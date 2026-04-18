@@ -41,7 +41,10 @@ private struct TapeCanvasView: View {
         CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
     }
 
-    private let toolbarEdgeMargin: CGFloat = 10
+    /// Top/bottom dock: balanced offset from safe area (unchanged feel).
+    private let toolbarTopBottomMargin: CGFloat = 11
+    /// Leading/trailing dock: tighter so the vertical strip reads as “on the edge” (still inside safe area).
+    private let toolbarSideDockMargin: CGFloat = 7
     private let toolbarHintReserve: CGFloat = 56
 
     var body: some View {
@@ -101,7 +104,8 @@ private struct TapeCanvasView: View {
                     toolbarSize: toolbarMeasuredSize,
                     containerSize: geo.size,
                     safeArea: safe,
-                    margin: toolbarEdgeMargin
+                    topBottomMargin: toolbarTopBottomMargin,
+                    sideDockMargin: toolbarSideDockMargin
                 )
                 let display = CGPoint(x: docked.x + dragTranslation.width, y: docked.y + dragTranslation.height)
 
@@ -159,7 +163,8 @@ private struct TapeCanvasView: View {
                                     toolbarSize: toolbarMeasuredSize,
                                     containerSize: geo.size,
                                     safeArea: safe,
-                                    margin: toolbarEdgeMargin
+                                    topBottomMargin: toolbarTopBottomMargin,
+                                    sideDockMargin: toolbarSideDockMargin
                                 )
                                 let finalCenter = CGPoint(
                                     x: dockedNow.x + value.translation.width,
@@ -170,7 +175,8 @@ private struct TapeCanvasView: View {
                                     toolbarSize: toolbarMeasuredSize,
                                     containerSize: geo.size,
                                     safeArea: safe,
-                                    margin: toolbarEdgeMargin
+                                    topBottomMargin: toolbarTopBottomMargin,
+                                    sideDockMargin: toolbarSideDockMargin
                                 )
                                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
                                     toolbarDockRaw = next.rawValue
@@ -372,13 +378,16 @@ final class TapeCanvasUIView: UIView {
     private var noiseTile: UIImage?
     /// Flag to track if redraw is needed (performance optimization).
     private var needsRedraw: Bool = true
+    /// Muted, paper-friendly hues (first slot keeps dark-mode “paper ink” behavior).
     private let primaryColorPalette: [UIColor] = [
-        UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9),   // graphite
-        UIColor(red: 0.12, green: 0.9, blue: 0.98, alpha: 0.95),   // neon cyan 2
-        UIColor(red: 1.0, green: 0.35, blue: 0.78, alpha: 0.95),   // neon pink
-        UIColor(red: 0.72, green: 0.45, blue: 1.0, alpha: 0.95),   // neon violet
-        UIColor(red: 0.98, green: 0.42, blue: 0.12, alpha: 0.95),  // neon orange
-        UIColor(red: 0.22, green: 1.0, blue: 0.85, alpha: 0.95)    // neon mint
+        UIColor(red: 0.18, green: 0.18, blue: 0.19, alpha: 0.92),   // graphite #2E2E30
+        UIColor(red: 0.33, green: 0.40, blue: 0.48, alpha: 0.93),   // slate blue #54667A
+        UIColor(red: 0.22, green: 0.42, blue: 0.44, alpha: 0.93),   // deep teal #386B70
+        UIColor(red: 0.28, green: 0.44, blue: 0.34, alpha: 0.93),   // forest green #477056
+        UIColor(red: 0.62, green: 0.38, blue: 0.30, alpha: 0.93),   // terracotta #9E614D
+        UIColor(red: 0.62, green: 0.44, blue: 0.48, alpha: 0.93),   // dusty rose #9E707A
+        UIColor(red: 0.45, green: 0.38, blue: 0.54, alpha: 0.93),   // muted purple #73618A
+        UIColor(red: 0.48, green: 0.42, blue: 0.36, alpha: 0.92)    // warm umber #7A6B5C
     ]
     private let achievementColorPalette: [UIColor] = [
         UIColor(red: 0.65, green: 0.77, blue: 0.95, alpha: 0.95),  // pastel blue

@@ -22,11 +22,14 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Center of the toolbar when docked to this edge (`toolbarSize` should match current horizontal vs vertical layout).
+    /// - `topBottomMargin`: breathing room from top/bottom safe inset (unchanged feel for horizontal dock).
+    /// - `sideDockMargin`: small gap from leading/trailing safe inset so vertical docks hug the edge without clipping.
     func dockedCenter(
         toolbarSize: CGSize,
         containerSize: CGSize,
         safeArea: EdgeInsets,
-        margin: CGFloat
+        topBottomMargin: CGFloat,
+        sideDockMargin: CGFloat
     ) -> CGPoint {
         let w = toolbarSize.width
         let h = toolbarSize.height
@@ -35,20 +38,20 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
 
         switch self {
         case .top:
-            return CGPoint(x: midX, y: safeArea.top + margin + h / 2)
+            return CGPoint(x: midX, y: safeArea.top + topBottomMargin + h / 2)
         case .bottom:
             return CGPoint(
                 x: midX,
-                y: containerSize.height - safeArea.bottom - margin - h / 2
+                y: containerSize.height - safeArea.bottom - topBottomMargin - h / 2
             )
         case .leading:
             return CGPoint(
-                x: safeArea.leading + margin + w / 2,
+                x: safeArea.leading + sideDockMargin + w / 2,
                 y: midY
             )
         case .trailing:
             return CGPoint(
-                x: containerSize.width - safeArea.trailing - margin - w / 2,
+                x: containerSize.width - safeArea.trailing - sideDockMargin - w / 2,
                 y: midY
             )
         }
@@ -83,7 +86,8 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
         toolbarSize: CGSize,
         containerSize: CGSize,
         safeArea: EdgeInsets,
-        margin: CGFloat
+        topBottomMargin: CGFloat,
+        sideDockMargin: CGFloat
     ) -> CanvasToolbarDock {
         var best: CanvasToolbarDock = .top
         var bestDist = CGFloat.infinity
@@ -92,7 +96,8 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
                 toolbarSize: toolbarSize,
                 containerSize: containerSize,
                 safeArea: safeArea,
-                margin: margin
+                topBottomMargin: topBottomMargin,
+                sideDockMargin: sideDockMargin
             )
             let d = hypot(finalCenter.x - c.x, finalCenter.y - c.y)
             if d < bestDist {
