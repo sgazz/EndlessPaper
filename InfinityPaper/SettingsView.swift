@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var highContrastUI: Bool
     @State private var largerMenuButtons: Bool
     @State private var verboseAccessibilityHints: Bool
+    @State private var legacyRadialMenuTrigger: Bool
 
     let palette: [UIColor]
     let onSelectBaseColor: (UIColor) -> Void
@@ -26,6 +27,7 @@ struct SettingsView: View {
     let onClearSession: () -> Void
     let onLoadPreviousSession: () -> Void
     let onResetRadialMenuPosition: () -> Void
+    let onLegacyRadialTriggerChanged: () -> Void
     let onDismiss: () -> Void
 
     // UserDefaults keys
@@ -47,6 +49,7 @@ struct SettingsView: View {
         static let highContrastUI = "settings.ui.highContrast"
         static let largerMenuButtons = "settings.ui.largerButtons"
         static let verboseAccessibilityHints = "settings.ui.verboseA11y"
+        static let legacyRadialMenuTrigger = "settings.ui.legacyRadialMenuTrigger"
     }
 
     init(
@@ -58,6 +61,7 @@ struct SettingsView: View {
         onClearSession: @escaping () -> Void,
         onLoadPreviousSession: @escaping () -> Void,
         onResetRadialMenuPosition: @escaping () -> Void,
+        onLegacyRadialTriggerChanged: @escaping () -> Void = {},
         onDismiss: @escaping () -> Void
     ) {
         self.palette = palette
@@ -66,6 +70,7 @@ struct SettingsView: View {
         self.onClearSession = onClearSession
         self.onLoadPreviousSession = onLoadPreviousSession
         self.onResetRadialMenuPosition = onResetRadialMenuPosition
+        self.onLegacyRadialTriggerChanged = onLegacyRadialTriggerChanged
         self.onDismiss = onDismiss
 
         // Load defaults
@@ -88,6 +93,7 @@ struct SettingsView: View {
         _highContrastUI = State(initialValue: defaults.object(forKey: Keys.highContrastUI) != nil ? defaults.bool(forKey: Keys.highContrastUI) : false)
         _largerMenuButtons = State(initialValue: defaults.object(forKey: Keys.largerMenuButtons) != nil ? defaults.bool(forKey: Keys.largerMenuButtons) : false)
         _verboseAccessibilityHints = State(initialValue: defaults.object(forKey: Keys.verboseAccessibilityHints) != nil ? defaults.bool(forKey: Keys.verboseAccessibilityHints) : true)
+        _legacyRadialMenuTrigger = State(initialValue: defaults.object(forKey: Keys.legacyRadialMenuTrigger) != nil && defaults.bool(forKey: Keys.legacyRadialMenuTrigger))
 
         // Apply initial color selection if matches current
         if let idx = palette.firstIndex(where: { $0.isEqual(currentBaseColor) }) {
@@ -105,6 +111,14 @@ struct SettingsView: View {
 
                 Section(header: Text("Export & Share")) {
                     exportSection
+                }
+
+                Section(header: Text("Toolbar"), footer: Text("The bottom bar is the default for tools. Enable the ∞ trigger only if you want the classic radial layout (e.g. for comparison).")) {
+                    Toggle("Show ∞ radial menu trigger", isOn: $legacyRadialMenuTrigger)
+                        .onChange(of: legacyRadialMenuTrigger) { _, newValue in
+                            UserDefaults.standard.set(newValue, forKey: Keys.legacyRadialMenuTrigger)
+                            onLegacyRadialTriggerChanged()
+                        }
                 }
 
                 Section(header: Text("Interactions & Gestures")) {

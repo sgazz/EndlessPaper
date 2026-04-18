@@ -7,7 +7,7 @@
 "splash.whisper" = "Think, scribble, let the tape roll.";
 
 "first_use.lead" = "Draw with one finger.";
-"first_use.body" = "Slide the paper with two. Tap ∞ when you want tools.";
+"first_use.body" = "Slide the paper with two. Tools sit in the bar below — or turn on the ∞ trigger in Settings for the classic radial menu.";
 "first_use.dismiss" = "OK";
 
 "about.purpose" = "Not for lists or neat notes. A place to unload your head, doodle, and follow a line as far as it goes.";
@@ -16,6 +16,19 @@
 "action.done" = "Done";
 "action.cancel" = "Cancel";
 "action.clear" = "Clear";
+
+"toolbar.color" = "Brush color";
+"toolbar.color_slot" = "Color %d";
+"toolbar.line_width" = "Line width";
+"toolbar.undo" = "Undo";
+"toolbar.redo" = "Redo";
+"toolbar.export" = "Export";
+"toolbar.settings" = "Settings";
+"toolbar.more" = "More";
+"toolbar.more_about" = "About";
+
+"accessibility.canvas_hint_toolbar" = "Two-finger pan to move the tape. Use the bottom toolbar for colors, line width, undo, export, and settings.";
+"accessibility.canvas_hint_radial" = "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools.";
 "toast.saved" = "Saved";
 "toast.save_failed" = "Save failed";
 "toast.undo" = "Undo";

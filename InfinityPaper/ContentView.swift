@@ -19,14 +19,18 @@ struct ContentView: View {
 }
 
 private struct TapeCanvasView: View {
+    @StateObject private var toolbarBroker = CanvasToolbarStateBroker()
     @State private var showAbout = false
+    @State private var showSettings = false
     @AppStorage("firstUseOrientationDismissed") private var firstUseOrientationDismissed = false
     @State private var orientationHintOpacity: Double = 1
 
     var body: some View {
         ZStack(alignment: .bottom) {
             TapeCanvasRepresentable(
+                toolbarBroker: toolbarBroker,
                 onRequestSettings: { DispatchQueue.main.async { showAbout = true } },
+                onOpenFullSettings: { DispatchQueue.main.async { showSettings = true } },
                 onCanvasReady: { _ in }
             )
             .ignoresSafeArea()
@@ -59,9 +63,72 @@ private struct TapeCanvasView: View {
                 .allowsHitTesting(true)
                 .transition(.opacity)
             }
+
+            VStack {
+                Spacer(minLength: 0)
+                CanvasFloatingToolbar(
+                    broker: toolbarBroker,
+                    onSelectColor: { idx in
+                        toolbarBroker.canvas?.toolbarSelectColor(at: idx)
+                    },
+                    onLineWidth: {
+                        toolbarBroker.canvas?.toolbarCycleLineWidthPersist()
+                    },
+                    onUndo: {
+                        toolbarBroker.canvas?.toolbarUndo()
+                    },
+                    onRedo: {
+                        toolbarBroker.canvas?.toolbarRedo()
+                    },
+                    onExport: {
+                        toolbarBroker.canvas?.toolbarExport()
+                    },
+                    onSettings: {
+                        toolbarBroker.canvas?.toolbarOpenFullSettings()
+                    },
+                    onMoreAbout: { showAbout = true }
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+            }
+            .allowsHitTesting(true)
         }
         .sheet(isPresented: $showAbout) {
             AboutView(onDismiss: { showAbout = false })
+        }
+        .sheet(isPresented: $showSettings) {
+            if let cv = toolbarBroker.canvas {
+                SettingsView(
+                    palette: cv.exposedPrimaryPalette,
+                    currentBaseColor: cv.exposedBaseStrokeColor,
+                    currentLineWidth: cv.exposedBaseLineWidth,
+                    onSelectBaseColor: { color in
+                        cv.setBaseStrokeColorFromSettings(color)
+                        toolbarBroker.syncFromCanvas()
+                    },
+                    onLineWidthChanged: { width in
+                        cv.setBaseLineWidthFromSettings(width)
+                        toolbarBroker.syncFromCanvas()
+                    },
+                    onClearSession: {
+                        cv.confirmAndClearSessionFromSettings()
+                        toolbarBroker.syncFromCanvas()
+                    },
+                    onLoadPreviousSession: {
+                        cv.loadSessionFromSettings()
+                    },
+                    onResetRadialMenuPosition: {
+                        cv.resetRadialMenuPositionFromSettings()
+                    },
+                    onLegacyRadialTriggerChanged: {
+                        cv.refreshLegacyRadialTriggerVisibility()
+                    },
+                    onDismiss: { showSettings = false }
+                )
+            } else {
+                Color.clear
+                    .onAppear { showSettings = false }
+            }
         }
     }
 }
@@ -114,23 +181,37 @@ private struct AboutView: View {
 }
 
 private struct TapeCanvasRepresentable: UIViewRepresentable {
+    @ObservedObject var toolbarBroker: CanvasToolbarStateBroker
     var onRequestSettings: () -> Void
+    var onOpenFullSettings: () -> Void
     var onCanvasReady: (TapeCanvasUIView) -> Void
 
     func makeUIView(context: Context) -> TapeCanvasUIView {
         let view = TapeCanvasUIView()
-        // Background color will be set by the view's backgroundColorTone property
         view.onRequestSettings = onRequestSettings
+        view.onOpenFullSettings = onOpenFullSettings
+        view.onToolbarStateChange = { [weak toolbarBroker] in
+            DispatchQueue.main.async {
+                toolbarBroker?.syncFromCanvas()
+            }
+        }
+        toolbarBroker.attach(view)
         onCanvasReady(view)
         return view
     }
 
     func updateUIView(_ uiView: TapeCanvasUIView, context: Context) {
         uiView.onRequestSettings = onRequestSettings
+        uiView.onOpenFullSettings = onOpenFullSettings
+        uiView.onToolbarStateChange = { [weak toolbarBroker] in
+            DispatchQueue.main.async {
+                toolbarBroker?.syncFromCanvas()
+            }
+        }
     }
 }
 
-private final class TapeCanvasUIView: UIView {
+final class TapeCanvasUIView: UIView {
     private enum Layout {
         static let menuTriggerSize: CGFloat = 88
         static let menuTriggerMargin: CGFloat = 10
@@ -248,8 +329,23 @@ private final class TapeCanvasUIView: UIView {
         UIPanGestureRecognizer(target: self, action: #selector(handleMenuTriggerPan(_:)))
     }()
 
-    /// Set by the SwiftUI representable when the user taps the About (info) button in the radial menu.
+    /// Radial menu “About” / legacy info entry.
     var onRequestSettings: (() -> Void)?
+    /// Bottom toolbar gear: full Settings sheet.
+    var onOpenFullSettings: (() -> Void)?
+    /// Called when undo/redo availability or line width changes so SwiftUI toolbar can refresh.
+    var onToolbarStateChange: (() -> Void)?
+
+    private static let legacyRadialDefaultsKey = "settings.ui.legacyRadialMenuTrigger"
+
+    static func readLegacyRadialMenuTriggerEnabled() -> Bool {
+        UserDefaults.standard.object(forKey: legacyRadialDefaultsKey) != nil
+            && UserDefaults.standard.bool(forKey: legacyRadialDefaultsKey)
+    }
+
+    var toolbarUndoEnabled: Bool { !sessionState.undoStack.isEmpty }
+    var toolbarRedoEnabled: Bool { !sessionState.redoPayloadStack.isEmpty }
+    var toolbarBaseLineWidth: CGFloat { baseLineWidth }
 
     /// Exposed for Settings: current brush color.
     var exposedBaseStrokeColor: UIColor { baseStrokeColor }
@@ -279,6 +375,63 @@ private final class TapeCanvasUIView: UIView {
         saveMenuTriggerPosition()
         radialMenu.setMenuCenterAndSave(clamped)
         setNeedsLayout()
+    }
+
+    // MARK: - Bottom toolbar (SwiftUI)
+
+    private func postToolbarStateChange() {
+        onToolbarStateChange?()
+    }
+
+    private func applyLegacyRadialMenuVisibility() {
+        let show = Self.readLegacyRadialMenuTriggerEnabled()
+        menuTriggerButton.isHidden = !show
+        menuTriggerButton.isUserInteractionEnabled = show
+        menuTriggerPan.isEnabled = show
+    }
+
+    /// Call after toggling the legacy radial trigger in Settings so the ∞ button appears or hides immediately.
+    func refreshLegacyRadialTriggerVisibility() {
+        applyLegacyRadialMenuVisibility()
+    }
+
+    func toolbarUndo() {
+        undoLastStroke()
+    }
+
+    func toolbarRedo() {
+        redoLastStroke()
+    }
+
+    func toolbarExport() {
+        exportVisible()
+    }
+
+    func toolbarOpenFullSettings() {
+        onOpenFullSettings?()
+    }
+
+    func toolbarCycleLineWidthPersist() {
+        cycleLineWidth()
+        UserDefaults.standard.set(Double(baseLineWidth), forKey: SettingsKeys.baseLineWidth)
+        setNeedsDisplay()
+        postToolbarStateChange()
+    }
+
+    func toolbarSelectColor(at index: Int) {
+        let palette = exposedPrimaryPalette
+        guard palette.indices.contains(index) else { return }
+        let chosen = palette[index]
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        let isFirstPrimary = index == 0
+        let isFirstAchievement = index == primaryColorPalette.count
+        baseStrokeColor = (isDark && (isFirstPrimary || isFirstAchievement)) ? .white : chosen
+        UserDefaults.standard.set(index, forKey: SettingsKeys.baseColorIndex)
+        radialMenu.updateColorsForDarkMode(
+            graphiteColor: graphiteColor.resolvedColor(with: traitCollection),
+            firstColorMenuTint: isDark ? .white : nil
+        )
+        setNeedsDisplay()
     }
 
     override init(frame: CGRect) {
@@ -430,6 +583,7 @@ private final class TapeCanvasUIView: UIView {
         lastTouchLocation = nil
         stopAutoScroll()
         setNeedsDisplay()
+        postToolbarStateChange()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -587,6 +741,7 @@ private final class TapeCanvasUIView: UIView {
                 self.contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
                 self.setNeedsDisplay()
                 self.radialMenu.updateActionAvailability(undoEnabled: !self.sessionState.undoStack.isEmpty, redoEnabled: !self.sessionState.redoPayloadStack.isEmpty)
+                self.postToolbarStateChange()
             case .failure:
                 // Session load failed - this is expected if no session exists yet
                 break
@@ -596,6 +751,7 @@ private final class TapeCanvasUIView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        applyLegacyRadialMenuVisibility()
         // Update background color to adapt to dark mode
         backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection)
         
@@ -670,6 +826,7 @@ private final class TapeCanvasUIView: UIView {
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         setNeedsDisplay()
         showToast(text: NSLocalizedString("toast.undo", comment: "Undo"), type: .warning)
+        postToolbarStateChange()
     }
 
     /// Re-applies the most recently undone stroke (Redo). No-op if nothing to redo.
@@ -678,6 +835,7 @@ private final class TapeCanvasUIView: UIView {
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         setNeedsDisplay()
         showToast(text: NSLocalizedString("toast.redo", comment: "Redo"), type: .success)
+        postToolbarStateChange()
     }
 
     private func exportVisible() {
@@ -777,6 +935,7 @@ private final class TapeCanvasUIView: UIView {
         sessionManager.deleteSession()
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         setNeedsDisplay()
+        postToolbarStateChange()
     }
 
     private func showToast(text: String, type: ToastType = .info) {
@@ -819,6 +978,7 @@ private final class TapeCanvasUIView: UIView {
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: TapeCanvasUIView, previousTraitCollection: UITraitCollection) in
             self?.handleUserInterfaceStyleChange(previous: previousTraitCollection)
         }
+        applyLegacyRadialMenuVisibility()
     }
 
     /// Applies brush color and line width from UserDefaults (set in Settings) so they persist across launches.
@@ -919,7 +1079,11 @@ private final class TapeCanvasUIView: UIView {
 
     override var accessibilityHint: String? {
         get {
-            "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools."
+            if Self.readLegacyRadialMenuTriggerEnabled() {
+                NSLocalizedString("accessibility.canvas_hint_radial", comment: "VoiceOver: canvas with legacy radial")
+            } else {
+                NSLocalizedString("accessibility.canvas_hint_toolbar", comment: "VoiceOver: canvas with bottom toolbar")
+            }
         }
         set { }
     }
