@@ -354,6 +354,34 @@ private final class TapeCanvasUIView: UIView {
         CGPoint(x: viewPoint.x + contentOffset.x, y: viewPoint.y + contentOffset.y)
     }
 
+    /// Appends touch samples using `coalescedTouches` when available so fast strokes stay curved between display frames.
+    /// Timestamps are spaced monotonically between the last stored time and `touch.timestamp` so width/speed stays stable.
+    private func appendStrokeSamplesFromTouch(_ touch: UITouch, event: UIEvent?) {
+        guard var stroke = currentStroke else { return }
+        let samples = event?.coalescedTouches(for: touch) ?? [touch]
+        let n = samples.count
+        let lastT = stroke.times.last ?? touch.timestamp
+        let endT = max(touch.timestamp, lastT + 1e-4)
+        let span = endT - lastT
+
+        for i in 0..<n {
+            let p = toWorldPoint(samples[i].location(in: self))
+            if let lp = stroke.points.last {
+                let dist = hypot(p.x - lp.x, p.y - lp.y)
+                if dist < 0.02, i < n - 1 { continue }
+            }
+            let t: TimeInterval
+            if n == 1 {
+                t = endT
+            } else {
+                t = lastT + span * Double(i + 1) / Double(n)
+            }
+            stroke.points.append(p)
+            stroke.times.append(t)
+        }
+        currentStroke = stroke
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
         if radialMenu.isMenuVisible { return }
@@ -378,12 +406,14 @@ private final class TapeCanvasUIView: UIView {
         guard let touch = touches.first, touches.count == 1 else { return }
         let location = touch.location(in: self)
         lastTouchLocation = location
-        currentStroke?.points.append(toWorldPoint(location))
-        currentStroke?.times.append(touch.timestamp)
+        appendStrokeSamplesFromTouch(touch, event: event)
         setNeedsDisplay()
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let touch = touches.first, touches.count == 1 {
+            appendStrokeSamplesFromTouch(touch, event: event)
+        }
         guard let stroke = currentStroke, let segmentId = currentStrokeSegmentId else { return }
         sessionState.commitCompletedStroke(segmentId: segmentId, stroke: stroke)
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
@@ -470,8 +500,15 @@ private final class TapeCanvasUIView: UIView {
         let dt = CGFloat(autoScrollLink?.duration ?? 1.0 / 60.0)
         contentOffset.x += autoScrollSpeed * dt
         let worldPoint = toWorldPoint(lastTouchLocation)
-        currentStroke?.points.append(worldPoint)
-        currentStroke?.times.append(CACurrentMediaTime())
+        guard var stroke = currentStroke else {
+            stopAutoScroll()
+            return
+        }
+        let lastT = stroke.times.last ?? CACurrentMediaTime()
+        let stamp = lastT + Double(dt)
+        stroke.points.append(worldPoint)
+        stroke.times.append(stamp)
+        currentStroke = stroke
         updateSegmentsIfNeeded()
         setNeedsDisplay()
     }
