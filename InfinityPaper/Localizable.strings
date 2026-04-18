@@ -26,6 +26,10 @@
 "toolbar.settings" = "Settings";
 "toolbar.more" = "More";
 "toolbar.more_about" = "About";
+"toolbar.width_a11y_thin" = "Thin stroke";
+"toolbar.width_a11y_medium" = "Medium stroke";
+"toolbar.width_a11y_bold" = "Bold stroke";
+"toolbar.width_a11y_heavy" = "Heavy stroke";
 
 "accessibility.canvas_hint_toolbar" = "Two-finger pan to move the tape. Use the bottom toolbar for colors, line width, undo, export, and settings.";
 "accessibility.canvas_hint_radial" = "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools.";

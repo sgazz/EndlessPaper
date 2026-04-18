@@ -5,6 +5,7 @@
 //  SwiftUI capsule toolbar: primary drawing controls with calm paper/graphite styling.
 //
 
+import Combine
 import SwiftUI
 import UIKit
 
@@ -17,6 +18,10 @@ final class CanvasToolbarStateBroker: ObservableObject {
     @Published var undoEnabled: Bool = false
     @Published var redoEnabled: Bool = false
     @Published var lineWidthLabel: String = ""
+    @Published var selectedColorIndex: Int = 0
+    @Published var selectedWidthPresetIndex: Int = 0
+    /// Matches actual stroke (e.g. white in dark mode for first slot), unlike raw palette swatches.
+    @Published var strokePreviewUIColor: UIColor = .darkGray
 
     func attach(_ canvas: TapeCanvasUIView) {
         self.canvas = canvas
@@ -28,15 +33,160 @@ final class CanvasToolbarStateBroker: ObservableObject {
             undoEnabled = false
             redoEnabled = false
             lineWidthLabel = ""
+            selectedColorIndex = 0
+            selectedWidthPresetIndex = 0
+            strokePreviewUIColor = .darkGray
             return
         }
         undoEnabled = canvas.toolbarUndoEnabled
         redoEnabled = canvas.toolbarRedoEnabled
         lineWidthLabel = String(format: "%.1f", canvas.toolbarBaseLineWidth)
+        selectedColorIndex = canvas.toolbarSelectedPaletteIndex
+        selectedWidthPresetIndex = canvas.toolbarWidthPresetIndex()
+        strokePreviewUIColor = canvas.exposedBaseStrokeColor
     }
 
     var paletteUIColors: [UIColor] {
         canvas?.exposedPrimaryPalette ?? []
+    }
+}
+
+// MARK: - Picker chrome (shared mini-panel look)
+
+private struct ToolbarPickerPanel<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let isPad: Bool
+    @ViewBuilder var content: () -> Content
+
+    private var fill: Color {
+        Color(uiColor: UIColor { traits in
+            if traits.userInterfaceStyle == .dark {
+                UIColor(white: 0.12, alpha: 0.96)
+            } else {
+                UIColor(red: 0.99, green: 0.98, blue: 0.96, alpha: 0.98)
+            }
+        })
+    }
+
+    private var stroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+    }
+
+    var body: some View {
+        content()
+            .padding(.horizontal, isPad ? 18 : 14)
+            .padding(.vertical, isPad ? 14 : 12)
+            .background(
+                RoundedRectangle(cornerRadius: isPad ? 18 : 16, style: .continuous)
+                    .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: isPad ? 18 : 16, style: .continuous)
+                            .stroke(stroke, lineWidth: 0.5)
+                    )
+            )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.1), radius: isPad ? 12 : 8, y: isPad ? 4 : 3)
+    }
+}
+
+// MARK: - Color popover body
+
+private struct ToolbarColorPickerBody: View {
+    let colors: [UIColor]
+    let selectedIndex: Int
+    let isPad: Bool
+    let onPick: (Int) -> Void
+
+    private var swatch: CGFloat { isPad ? 30 : 26 }
+    private var spacing: CGFloat { isPad ? 12 : 10 }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: spacing) {
+                ForEach(Array(colors.enumerated()), id: \.offset) { idx, ui in
+                    Button {
+                        onPick(idx)
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(Color(uiColor: ui))
+                                .frame(width: swatch, height: swatch)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
+                                )
+                            if idx == selectedIndex {
+                                Circle()
+                                    .stroke(Color.primary.opacity(0.55), lineWidth: 2)
+                                    .frame(width: swatch + 6, height: swatch + 6)
+                            }
+                        }
+                        .frame(width: swatch + 10, height: swatch + 10)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(String(format: NSLocalizedString("toolbar.color_slot", comment: ""), idx + 1)))
+                }
+            }
+        }
+        .frame(maxWidth: isPad ? 360 : 260)
+    }
+}
+
+// MARK: - Line width popover body
+
+private struct ToolbarLineWidthPickerBody: View {
+    let presets: [CGFloat]
+    let selectedIndex: Int
+    let isPad: Bool
+    let sampleTint: Color
+    let onPick: (Int) -> Void
+
+    private var cellW: CGFloat { isPad ? 48 : 42 }
+    private var barWidth: CGFloat { isPad ? 36 : 32 }
+
+    var body: some View {
+        HStack(spacing: isPad ? 14 : 10) {
+            ForEach(Array(presets.enumerated()), id: \.offset) { idx, width in
+                Button {
+                    onPick(idx)
+                } label: {
+                    let displayH = min(max(width * 1.05, 2), 8)
+                    VStack(spacing: 6) {
+                        Capsule(style: .continuous)
+                            .fill(sampleTint)
+                            .frame(width: barWidth, height: displayH)
+                        if isPad {
+                            Text(String(format: "%.1f", width))
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(width: cellW, height: isPad ? 52 : 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.primary.opacity(idx == selectedIndex ? 0.08 : 0))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(idx == selectedIndex ? 0.35 : 0), lineWidth: 1.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(widthAccessibilityLabel(for: width))
+            }
+        }
+    }
+
+    private func widthAccessibilityLabel(for width: CGFloat) -> Text {
+        switch width {
+        case ..<2:
+            return Text(String(localized: "toolbar.width_a11y_thin"))
+        case ..<3.5:
+            return Text(String(localized: "toolbar.width_a11y_medium"))
+        case ..<5:
+            return Text(String(localized: "toolbar.width_a11y_bold"))
+        default:
+            return Text(String(localized: "toolbar.width_a11y_heavy"))
+        }
     }
 }
 
@@ -48,12 +198,15 @@ struct CanvasFloatingToolbar: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var onSelectColor: (Int) -> Void
-    var onLineWidth: () -> Void
+    var onSelectLineWidthPreset: (Int) -> Void
     var onUndo: () -> Void
     var onRedo: () -> Void
     var onExport: () -> Void
     var onSettings: () -> Void
     var onMoreAbout: () -> Void
+
+    @State private var showColorPicker = false
+    @State private var showWidthPicker = false
 
     private var isPad: Bool {
         UIDevice.current.userInterfaceIdiom == .pad || horizontalSizeClass == .regular
@@ -81,29 +234,49 @@ struct CanvasFloatingToolbar: View {
         colorScheme == .dark ? Color.white.opacity(0.88) : Color.black.opacity(0.55)
     }
 
+    private var currentSwatchColor: Color {
+        Color(uiColor: broker.strokePreviewUIColor)
+    }
+
     var body: some View {
         HStack(spacing: interItemSpacing) {
-            Menu {
-                ForEach(Array(broker.paletteUIColors.enumerated()), id: \.offset) { idx, ui in
-                    Button {
-                        onSelectColor(idx)
-                    } label: {
-                        Circle()
-                            .fill(Color(uiColor: ui))
-                            .frame(width: 26, height: 26)
-                            .overlay(Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1))
-                    }
-                    .accessibilityLabel(Text(String(format: NSLocalizedString("toolbar.color_slot", comment: ""), idx + 1)))
-                }
+            Button {
+                showWidthPicker = false
+                showColorPicker = true
             } label: {
-                Image(systemName: "paintpalette.fill")
-                    .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                    .frame(width: iconFrame, height: iconFrame)
+                ZStack(alignment: .bottomTrailing) {
+                    Image(systemName: "paintpalette.fill")
+                        .font(.system(size: isPad ? 19 : 17, weight: .medium))
+                        .frame(width: iconFrame, height: iconFrame)
+                    Circle()
+                        .fill(currentSwatchColor)
+                        .frame(width: isPad ? 11 : 9, height: isPad ? 11 : 9)
+                        .overlay(Circle().stroke(strokeLine, lineWidth: 0.5))
+                        .offset(x: 2, y: 2)
+                }
+                .frame(width: iconFrame, height: iconFrame)
             }
-            .menuStyle(.button)
+            .buttonStyle(.plain)
             .accessibilityLabel(Text(String(localized: "toolbar.color")))
+            .popover(isPresented: $showColorPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                ToolbarPickerPanel(isPad: isPad) {
+                    ToolbarColorPickerBody(
+                        colors: broker.paletteUIColors,
+                        selectedIndex: broker.selectedColorIndex,
+                        isPad: isPad,
+                        onPick: { idx in
+                            onSelectColor(idx)
+                            showColorPicker = false
+                        }
+                    )
+                }
+                .presentationCompactAdaptation(.popover)
+            }
 
-            Button(action: onLineWidth) {
+            Button {
+                showColorPicker = false
+                showWidthPicker = true
+            } label: {
                 VStack(spacing: 1) {
                     Image(systemName: "lineweight")
                         .font(.system(size: isPad ? 17 : 15, weight: .medium))
@@ -115,6 +288,21 @@ struct CanvasFloatingToolbar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(String(localized: "toolbar.line_width")))
+            .popover(isPresented: $showWidthPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                ToolbarPickerPanel(isPad: isPad) {
+                    ToolbarLineWidthPickerBody(
+                        presets: TapeCanvasUIView.toolbarWidthPresets,
+                        selectedIndex: broker.selectedWidthPresetIndex,
+                        isPad: isPad,
+                        sampleTint: iconTint,
+                        onPick: { idx in
+                            onSelectLineWidthPreset(idx)
+                            showWidthPicker = false
+                        }
+                    )
+                }
+                .presentationCompactAdaptation(.popover)
+            }
 
             Button(action: onUndo) {
                 Image(systemName: "arrow.uturn.backward")

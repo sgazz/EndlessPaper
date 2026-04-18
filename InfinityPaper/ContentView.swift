@@ -26,7 +26,7 @@ private struct TapeCanvasView: View {
     @State private var orientationHintOpacity: Double = 1
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             TapeCanvasRepresentable(
                 toolbarBroker: toolbarBroker,
                 onRequestSettings: { DispatchQueue.main.async { showAbout = true } },
@@ -35,63 +35,64 @@ private struct TapeCanvasView: View {
             )
             .ignoresSafeArea()
 
-            if !firstUseOrientationDismissed {
-                VStack(spacing: 10) {
-                    Text(NSLocalizedString("first_use.lead", comment: "First session one-line hint"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text(NSLocalizedString("first_use.body", comment: "First session second line"))
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                    Button(NSLocalizedString("first_use.dismiss", comment: "Dismiss first-use hint")) {
-                        withAnimation(.easeOut(duration: 0.35)) {
-                            orientationHintOpacity = 0
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
-                            firstUseOrientationDismissed = true
-                        }
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 28)
-                .padding(.bottom, 36)
-                .opacity(orientationHintOpacity)
-                .allowsHitTesting(true)
-                .transition(.opacity)
-            }
-
             VStack {
                 Spacer(minLength: 0)
-                CanvasFloatingToolbar(
-                    broker: toolbarBroker,
-                    onSelectColor: { idx in
-                        toolbarBroker.canvas?.toolbarSelectColor(at: idx)
-                    },
-                    onLineWidth: {
-                        toolbarBroker.canvas?.toolbarCycleLineWidthPersist()
-                    },
-                    onUndo: {
-                        toolbarBroker.canvas?.toolbarUndo()
-                    },
-                    onRedo: {
-                        toolbarBroker.canvas?.toolbarRedo()
-                    },
-                    onExport: {
-                        toolbarBroker.canvas?.toolbarExport()
-                    },
-                    onSettings: {
-                        toolbarBroker.canvas?.toolbarOpenFullSettings()
-                    },
-                    onMoreAbout: { showAbout = true }
-                )
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
+                if !firstUseOrientationDismissed {
+                    VStack(spacing: 10) {
+                        Text(NSLocalizedString("first_use.lead", comment: "First session one-line hint"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(NSLocalizedString("first_use.body", comment: "First session second line"))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                        Button(NSLocalizedString("first_use.dismiss", comment: "Dismiss first-use hint")) {
+                            withAnimation(.easeOut(duration: 0.35)) {
+                                orientationHintOpacity = 0
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+                                firstUseOrientationDismissed = true
+                            }
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 8)
+                    .opacity(orientationHintOpacity)
+                    .allowsHitTesting(true)
+                    .transition(.opacity)
+                }
             }
             .allowsHitTesting(true)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 10) {
+            CanvasFloatingToolbar(
+                broker: toolbarBroker,
+                onSelectColor: { idx in
+                    toolbarBroker.canvas?.toolbarSelectColor(at: idx)
+                },
+                onSelectLineWidthPreset: { idx in
+                    toolbarBroker.canvas?.toolbarSetLineWidthPreset(at: idx)
+                },
+                onUndo: {
+                    toolbarBroker.canvas?.toolbarUndo()
+                },
+                onRedo: {
+                    toolbarBroker.canvas?.toolbarRedo()
+                },
+                onExport: {
+                    toolbarBroker.canvas?.toolbarExport()
+                },
+                onSettings: {
+                    toolbarBroker.canvas?.toolbarOpenFullSettings()
+                },
+                onMoreAbout: { showAbout = true }
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 4)
         }
         .sheet(isPresented: $showAbout) {
             AboutView(onDismiss: { showAbout = false })
@@ -218,8 +219,12 @@ final class TapeCanvasUIView: UIView {
     }
 
     private enum Defaults {
-        static let baseLineWidth: CGFloat = 2.2
+        /// Matches `toolbarWidthPresets` “medium” for new installs.
+        static let baseLineWidth: CGFloat = 2.5
     }
+
+    /// Curated widths for toolbar + radial width control (persisted).
+    static let toolbarWidthPresets: [CGFloat] = [1.5, 2.5, 4.0, 6.0]
 
     private let sessionState = TapeCanvasSessionState()
     private var currentStroke: TapeSessionStroke?
@@ -411,11 +416,39 @@ final class TapeCanvasUIView: UIView {
         onOpenFullSettings?()
     }
 
+    /// Legacy entry: cycles through `toolbarWidthPresets` and persists (radial width button).
     func toolbarCycleLineWidthPersist() {
         cycleLineWidth()
+    }
+
+    /// Toolbar / popover: set one of the curated widths.
+    func toolbarSetLineWidthPreset(at index: Int) {
+        guard Self.toolbarWidthPresets.indices.contains(index) else { return }
+        baseLineWidth = Self.toolbarWidthPresets[index]
         UserDefaults.standard.set(Double(baseLineWidth), forKey: SettingsKeys.baseLineWidth)
         setNeedsDisplay()
         postToolbarStateChange()
+    }
+
+    /// Index into `toolbarWidthPresets` nearest to the current width (for selection ring).
+    func toolbarWidthPresetIndex() -> Int {
+        let presets = Self.toolbarWidthPresets
+        guard !presets.isEmpty else { return 0 }
+        return presets.indices.min { a, b in
+            abs(presets[a] - baseLineWidth) < abs(presets[b] - baseLineWidth)
+        } ?? 0
+    }
+
+    /// Persisted palette index clamped to the current exposed palette (toolbar selection ring).
+    var toolbarSelectedPaletteIndex: Int {
+        let palette = exposedPrimaryPalette
+        guard !palette.isEmpty else { return 0 }
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: SettingsKeys.baseColorIndex) != nil {
+            let idx = defaults.integer(forKey: SettingsKeys.baseColorIndex)
+            return min(max(0, idx), palette.count - 1)
+        }
+        return 0
     }
 
     func toolbarSelectColor(at index: Int) {
@@ -1008,14 +1041,15 @@ final class TapeCanvasUIView: UIView {
     }
 
     private func cycleLineWidth() {
-        switch baseLineWidth {
-        case ..<3:
-            baseLineWidth = 4.2
-        case ..<5:
-            baseLineWidth = 6.2
-        default:
-            baseLineWidth = Defaults.baseLineWidth
-        }
+        let presets = Self.toolbarWidthPresets
+        let nearest = presets.indices.min { a, b in
+            abs(presets[a] - baseLineWidth) < abs(presets[b] - baseLineWidth)
+        } ?? 0
+        let next = (nearest + 1) % presets.count
+        baseLineWidth = presets[next]
+        UserDefaults.standard.set(Double(baseLineWidth), forKey: SettingsKeys.baseLineWidth)
+        setNeedsDisplay()
+        postToolbarStateChange()
     }
 
     private func applyPalette(index: Int) {
