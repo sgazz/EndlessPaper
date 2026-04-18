@@ -19,14 +19,45 @@ struct ContentView: View {
 
 private struct TapeCanvasView: View {
     @State private var showAbout = false
+    @AppStorage("firstUseOrientationDismissed") private var firstUseOrientationDismissed = false
+    @State private var orientationHintOpacity: Double = 1
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             TapeCanvasRepresentable(
                 onRequestSettings: { DispatchQueue.main.async { showAbout = true } },
                 onCanvasReady: { _ in }
             )
             .ignoresSafeArea()
+
+            if !firstUseOrientationDismissed {
+                VStack(spacing: 10) {
+                    Text(NSLocalizedString("first_use.lead", comment: "First session one-line hint"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(NSLocalizedString("first_use.body", comment: "First session second line"))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                    Button(NSLocalizedString("first_use.dismiss", comment: "Dismiss first-use hint")) {
+                        withAnimation(.easeOut(duration: 0.35)) {
+                            orientationHintOpacity = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+                            firstUseOrientationDismissed = true
+                        }
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 36)
+                .opacity(orientationHintOpacity)
+                .allowsHitTesting(true)
+                .transition(.opacity)
+            }
         }
         .sheet(isPresented: $showAbout) {
             AboutView(onDismiss: { showAbout = false })
@@ -40,26 +71,41 @@ private struct AboutView: View {
 
     private var appVersion: String {
         let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
-        return build != nil ? "\(short) (\(build!))" : short
+        if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String, !build.isEmpty {
+            return "\(short) (\(build))"
+        }
+        return short
     }
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Spacer()
-            Text("Infinity Paper")
+            Text(NSLocalizedString("app.name", comment: "App name"))
                 .font(.title.weight(.medium))
-            Text("Endless drawing canvas")
+            Text(NSLocalizedString("app.tagline", comment: "Tagline"))
                 .font(.subheadline)
-                .foregroundColor(.secondary)
-            Text("Version \(appVersion)")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+            Text(NSLocalizedString("about.purpose", comment: "About emotional positioning"))
+                .font(.footnote)
+                .foregroundStyle(.secondary.opacity(0.95))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(NSLocalizedString("about.sub", comment: "About secondary line"))
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Text(String(format: NSLocalizedString("app.version_format", comment: "Version format"), appVersion))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             Text("Hero&Peace© 2026")
                 .font(.caption2)
-                .foregroundColor(.secondary.opacity(0.8))
+                .foregroundStyle(.tertiary.opacity(0.85))
             Spacer()
-            Button("Done", action: onDismiss)
+            Button(NSLocalizedString("action.done", comment: "Done"), action: onDismiss)
                 .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -85,31 +131,17 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
 
 private final class TapeCanvasUIView: UIView {
     private enum Layout {
-        static let menuTriggerSize: CGFloat = 132
-        static let menuTriggerMargin: CGFloat = 12
+        static let menuTriggerSize: CGFloat = 88
+        static let menuTriggerMargin: CGFloat = 10
     }
 
     private enum Defaults {
         static let baseLineWidth: CGFloat = 2.2
     }
 
-    private struct Stroke {
-        var points: [CGPoint]
-        var times: [TimeInterval]
-        var color: UIColor
-        var lineWidth: CGFloat
-    }
-
-    private struct Segment {
-        var id: Int
-        var strokes: [Stroke]
-    }
-
-    private var segments: [Int: Segment] = [:]
-    private var currentStroke: Stroke?
+    private let sessionState = TapeCanvasSessionState()
+    private var currentStroke: TapeSessionStroke?
     private var currentStrokeSegmentId: Int?
-    /// Stack of (segmentId, strokeIndex) for completed strokes; used for Undo (Sparkles).
-    private var undoStack: [(segmentId: Int, strokeIndex: Int)] = []
     private var contentOffset: CGPoint = .zero
     private var displayLink: CADisplayLink?
     private var autoScrollLink: CADisplayLink?
@@ -179,12 +211,17 @@ private final class TapeCanvasUIView: UIView {
         host: self,
         graphiteColor: graphiteColor,
         colorSubPalette: primaryColorPalette,
-        setBaseStrokeColor: { [weak self] color in self?.baseStrokeColor = color },
+        setBaseStrokeColor: { [weak self] color, index in
+            guard let self = self else { return }
+            let isDark = self.traitCollection.userInterfaceStyle == .dark
+            self.baseStrokeColor = (isDark && index == 0) ? .white : color
+        },
         cycleLineWidth: { [weak self] in self?.cycleLineWidth() },
         onClearLastSession: { [weak self] in self?.confirmAndClearSession() },
         onExport: { [weak self] in self?.exportVisible() },
-        onSettings: { [weak self] in self?.onRequestSettings?() ?? self?.showToast(text: "Settings", type: .info) },
+        onSettings: { [weak self] in self?.onRequestSettings?() ?? self?.showToast(text: NSLocalizedString("toast.settings", comment: "Settings"), type: .info) },
         onSparkles: { [weak self] in self?.handleSparklesTap() },
+        onRedo: { [weak self] in self?.handleRedoTap() },
         onPaletteIndexChanged: { [weak self] index in
             self?.applyPalette(index: index)
         }
@@ -225,7 +262,9 @@ private final class TapeCanvasUIView: UIView {
     /// Called from Settings: show clear confirmation, then clear and toast.
     func confirmAndClearSessionFromSettings() { confirmAndClearSession() }
     /// Called from Settings: load the last saved session.
-    func loadSessionFromSettings() { loadSession(); setNeedsDisplay() }
+    func loadSessionFromSettings() {
+        loadSession()
+    }
     /// Called from Settings: reset trigger button and radial menu position to default (top‑left area).
     func resetRadialMenuPositionFromSettings() {
         let clamped = clampMenuTrigger(point: defaultMenuTriggerCenter())
@@ -247,7 +286,6 @@ private final class TapeCanvasUIView: UIView {
 
     deinit {
         sessionManager.stopPeriodicSaveTimer()
-        // Note: sessionManager handles its own NotificationCenter cleanup in deinit
     }
 
     override func draw(_ rect: CGRect) {
@@ -269,9 +307,9 @@ private final class TapeCanvasUIView: UIView {
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
-        let visibleIds = visibleSegmentIds()
+        let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: bounds.width, segmentWidth: segmentWidth)
         for id in visibleIds {
-            guard let segment = segments[id] else { continue }
+            guard let segment = sessionState.segments[id] else { continue }
             for stroke in segment.strokes {
                 CanvasRenderer.drawStroke(
                     toRenderStroke(stroke),
@@ -302,8 +340,8 @@ private final class TapeCanvasUIView: UIView {
         super.setNeedsDisplay(rect)
     }
 
-    /// Converts internal Stroke to RenderStroke for rendering.
-    private func toRenderStroke(_ stroke: Stroke) -> RenderStroke {
+    /// Converts a tape stroke to `RenderStroke` for rendering.
+    private func toRenderStroke(_ stroke: TapeSessionStroke) -> RenderStroke {
         RenderStroke(
             points: stroke.points,
             times: stroke.times,
@@ -324,13 +362,13 @@ private final class TapeCanvasUIView: UIView {
         let location = touch.location(in: self)
         lastTouchLocation = location
         let color = baseStrokeColor
-        currentStroke = Stroke(
+        currentStroke = TapeSessionStroke(
             points: [toWorldPoint(location)],
             times: [touch.timestamp],
             color: color,
             lineWidth: baseLineWidth
         )
-        currentStrokeSegmentId = segmentId(forWorldX: toWorldPoint(location).x)
+        currentStrokeSegmentId = sessionState.segmentId(forWorldX: toWorldPoint(location).x, segmentWidth: segmentWidth)
         startAutoScrollIfNeeded()
         setNeedsDisplay()
     }
@@ -347,10 +385,8 @@ private final class TapeCanvasUIView: UIView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let stroke = currentStroke, let segmentId = currentStrokeSegmentId else { return }
-        var segment = segments[segmentId] ?? Segment(id: segmentId, strokes: [])
-        segment.strokes.append(stroke)
-        segments[segmentId] = segment
-        undoStack.append((segmentId, segment.strokes.count - 1))
+        sessionState.commitCompletedStroke(segmentId: segmentId, stroke: stroke)
+        radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         telemetry.recordStroke(points: stroke.points.count)
         currentStroke = nil
         currentStrokeSegmentId = nil
@@ -458,39 +494,21 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func saveSession() {
-        let storedSegments = segments.values.map { segment in
-            StoredSegment(
-                id: segment.id,
-                strokes: segment.strokes.map { stroke in
-                    StoredStroke(
-                        points: stroke.points.map { StoredPoint(x: $0.x, y: $0.y) },
-                        times: stroke.times,
-                        color: stroke.color.toStoredColor(),
-                        lineWidth: stroke.lineWidth
-                    )
-                }
-            )
-        }
-        let storedSession = StoredSession(
-            segments: storedSegments,
-            contentOffset: StoredPoint(x: contentOffset.x, y: contentOffset.y),
+        let storedSession = sessionState.buildStoredSession(
+            contentOffset: contentOffset,
             savedAt: Date().timeIntervalSince1970
         )
-        
+
         sessionManager.saveSession(storedSession) { [weak self] result in
-            guard let self = self else { return }
+            guard let self else { return }
             switch result {
             case .success:
                 if !self.didShowSavedToastThisSession {
                     self.didShowSavedToastThisSession = true
-                    DispatchQueue.main.async {
-                        self.showToast(text: "Saved", type: .success)
-                    }
+                    self.showToast(text: NSLocalizedString("toast.saved", comment: "Saved"), type: .success)
                 }
             case .failure:
-                DispatchQueue.main.async {
-                    self.showToast(text: "Save failed", type: .error)
-                }
+                self.showToast(text: NSLocalizedString("toast.save_failed", comment: "Save failed"), type: .error)
             }
         }
     }
@@ -500,20 +518,10 @@ private final class TapeCanvasUIView: UIView {
             guard let self = self else { return }
             switch result {
             case .success(let storedSession):
-                self.segments = Dictionary(uniqueKeysWithValues: storedSession.segments.map { stored in
-                    let strokes = stored.strokes.map { stroke in
-                        Stroke(
-                            points: stroke.points.map { CGPoint(x: $0.x, y: $0.y) },
-                            times: stroke.times ?? [],
-                            color: stroke.color.toUIColor(),
-                            lineWidth: stroke.lineWidth
-                        )
-                    }
-                    return (stored.id, Segment(id: stored.id, strokes: strokes))
-                })
+                self.sessionState.applyStoredSession(storedSession)
                 self.contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
-                self.undoStack.removeAll()
                 self.setNeedsDisplay()
+                self.radialMenu.updateActionAvailability(undoEnabled: !self.sessionState.undoStack.isEmpty, redoEnabled: !self.sessionState.redoPayloadStack.isEmpty)
             case .failure:
                 // Session load failed - this is expected if no session exists yet
                 break
@@ -534,17 +542,23 @@ private final class TapeCanvasUIView: UIView {
         menuTriggerButton.layer.cornerRadius = menuTriggerButton.bounds.width / 2
         updateMenuTriggerButtonAppearance()
         toastManager.updateLayout(in: bounds)
+        bringSubviewToFront(menuTriggerButton)
     }
 
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+    /// Shared light/dark refresh; invoked when `userInterfaceStyle` changes via `registerForTraitChanges`.
+    private func handleUserInterfaceStyleChange(previous: UITraitCollection?) {
+        if traitCollection.userInterfaceStyle != previous?.userInterfaceStyle {
             // Dark mode changed - update colors and redraw
             backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection)
             noiseTile = nil // Invalidate noise tile cache to regenerate with new colors
             updateMenuTriggerButtonAppearance()
             toastManager.updateTraitCollection(traitCollection)
-            radialMenu.updateColorsForDarkMode(graphiteColor: graphiteColor.resolvedColor(with: traitCollection))
+            let isDark = traitCollection.userInterfaceStyle == .dark
+            radialMenu.updateColorsForDarkMode(
+                graphiteColor: graphiteColor.resolvedColor(with: traitCollection),
+                firstColorMenuTint: isDark ? .white : nil
+            )
+            applySavedBrushSettings()
             setNeedsDisplay()
         }
     }
@@ -552,9 +566,9 @@ private final class TapeCanvasUIView: UIView {
     private func drawStrokesForExport(in context: CGContext) {
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        let visibleIds = visibleSegmentIds()
+        let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: bounds.width, segmentWidth: segmentWidth)
         for id in visibleIds {
-            guard let segment = segments[id] else { continue }
+            guard let segment = sessionState.segments[id] else { continue }
             for stroke in segment.strokes {
                 CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
             }
@@ -564,93 +578,99 @@ private final class TapeCanvasUIView: UIView {
         }
     }
 
-    private func segmentId(forWorldX worldX: CGFloat) -> Int {
-        guard segmentWidth > 0 else { return 0 }
-        return Int(floor(worldX / segmentWidth))
-    }
-
-    private func visibleSegmentIds() -> [Int] {
-        guard segmentWidth > 0 else { return [] }
-        let minX = contentOffset.x
-        let maxX = contentOffset.x + bounds.width
-        let startId = segmentId(forWorldX: minX) - 1
-        let endId = segmentId(forWorldX: maxX) + 1
-        return Array(startId...endId)
-    }
-
     private func updateSegmentsIfNeeded() {
-        guard segmentWidth > 0 else { return }
-        let visibleIds = Set(visibleSegmentIds())
-        for id in visibleIds {
-            if segments[id] == nil {
-                segments[id] = Segment(id: id, strokes: [])
-            }
-        }
-        let keepIds = Set(visibleIds.union([segmentId(forWorldX: contentOffset.x)]))
-        let pruneIds = segments.keys.filter { !keepIds.contains($0) }
-        for id in pruneIds {
-            segments.removeValue(forKey: id)
-        }
+        sessionState.updateSegmentsIfNeeded(contentOffset: contentOffset, boundsWidth: bounds.width, segmentWidth: segmentWidth)
     }
-
 
     func showMenuAtCenter() {
-        menuTriggerButton.isHidden = true
         radialMenu.showMenu(at: menuTriggerButton.center)
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
         let location = recognizer.location(in: self)
         radialMenu.handleTap(at: location)
-        if !radialMenu.isMenuVisible {
-            menuTriggerButton.isHidden = false
-        }
     }
 
     @objc private func handleSparklesTap() {
         undoLastStroke()
     }
+    
+    @objc private func handleRedoTap() {
+        redoLastStroke()
+    }
 
     /// Removes the most recently completed stroke (Undo). No-op if nothing to undo.
     private func undoLastStroke() {
-        guard let last = undoStack.popLast() else { return }
-        guard var segment = segments[last.segmentId],
-              last.strokeIndex < segment.strokes.count else { return }
-        segment.strokes.remove(at: last.strokeIndex)
-        if segment.strokes.isEmpty {
-            segments.removeValue(forKey: last.segmentId)
-        } else {
-            segments[last.segmentId] = segment
-        }
+        guard sessionState.undoLastStroke() else { return }
+        radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         setNeedsDisplay()
-        showToast(text: "Undo", type: .warning)
+        showToast(text: NSLocalizedString("toast.undo", comment: "Undo"), type: .warning)
+    }
+
+    /// Re-applies the most recently undone stroke (Redo). No-op if nothing to redo.
+    private func redoLastStroke() {
+        guard sessionState.redoLastStroke() else { return }
+        radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
+        setNeedsDisplay()
+        showToast(text: NSLocalizedString("toast.redo", comment: "Redo"), type: .success)
     }
 
     private func exportVisible() {
-        exportManager.exportVisible(
-            bounds: bounds,
-            contentOffset: contentOffset,
-            backgroundColor: backgroundColorTone.resolvedColor(with: traitCollection),
-            drawStrokes: { [weak self] context in
-                self?.drawStrokesForExport(in: context)
-            },
-            drawNoise: { [weak self] context, rect in
-                guard let self = self else { return }
-                self.noiseTile = CanvasRenderer.drawNoise(
-                    in: context,
-                    rect: rect,
-                    noiseTile: self.noiseTile,
-                    backgroundColor: self.backgroundColorTone,
-                    traitCollection: self.traitCollection
-                )
-            },
-            presentShare: { [weak self] url in
-                self?.presentShare(url: url)
-            },
-            showToast: { [weak self] text, type in
-                self?.showToast(text: text, type: type)
-            }
-        )
+        let defaults = UserDefaults.standard
+        let exportFull = defaults.object(forKey: "settings.export.full") != nil && defaults.bool(forKey: "settings.export.full")
+        if exportFull, let bounds = sessionState.worldBoundingRectForExport(currentStroke: currentStroke) {
+            // Export full world bounds drawing
+            exportManager.exportFull(
+                worldBounds: bounds,
+                backgroundColor: backgroundColorTone.resolvedColor(with: traitCollection),
+                drawStrokesWorld: { [weak self] context in
+                    guard let self = self else { return }
+                    // Draw all strokes in full world coordinates
+                    context.setLineCap(.round)
+                    context.setLineJoin(.round)
+                    for segment in self.sessionState.segments.values {
+                        for stroke in segment.strokes {
+                            CanvasRenderer.drawStrokeWorld(self.toRenderStroke(stroke), in: context)
+                        }
+                    }
+                    if let stroke = self.currentStroke {
+                        CanvasRenderer.drawStrokeWorld(self.toRenderStroke(stroke), in: context)
+                    }
+                },
+                presentShare: { [weak self] url in
+                    self?.presentShare(url: url)
+                },
+                showToast: { [weak self] text, type in
+                    self?.showToast(text: text, type: type)
+                }
+            )
+        } else {
+            // Export visible area as before
+            exportManager.exportVisible(
+                bounds: bounds,
+                contentOffset: contentOffset,
+                backgroundColor: backgroundColorTone.resolvedColor(with: traitCollection),
+                drawStrokes: { [weak self] context in
+                    self?.drawStrokesForExport(in: context)
+                },
+                drawNoise: { [weak self] context, rect in
+                    guard let self = self else { return }
+                    self.noiseTile = CanvasRenderer.drawNoise(
+                        in: context,
+                        rect: rect,
+                        noiseTile: self.noiseTile,
+                        backgroundColor: self.backgroundColorTone,
+                        traitCollection: self.traitCollection
+                    )
+                },
+                presentShare: { [weak self] url in
+                    self?.presentShare(url: url)
+                },
+                showToast: { [weak self] text, type in
+                    self?.showToast(text: text, type: type)
+                }
+            )
+        }
     }
 
     private func presentShare(url: URL) {
@@ -665,14 +685,14 @@ private final class TapeCanvasUIView: UIView {
     func confirmAndClearSession() {
         guard let controller = findViewController() else { return }
         let alert = UIAlertController(
-            title: "Clear drawing?",
-            message: "This will remove all strokes in current session. This cannot be undone.",
+            title: NSLocalizedString("alert.clear_title", comment: "Clear drawing?"),
+            message: NSLocalizedString("alert.clear_message", comment: "This will remove all strokes in current session. This cannot be undone."),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("action.cancel", comment: "Cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("action.clear", comment: "Clear"), style: .destructive) { [weak self] _ in
             self?.clearLastDrawingSession()
-            self?.showToast(text: "Session cleared", type: .warning)
+            self?.showToast(text: NSLocalizedString("toast.session_cleared", comment: "Session cleared"), type: .warning)
         })
         if let popover = alert.popoverPresentationController {
             popover.sourceView = self
@@ -684,13 +704,15 @@ private final class TapeCanvasUIView: UIView {
 
     private func clearLastDrawingSession() {
         // Clear all segments and current stroke; reset telemetry, undo stack, and redraw.
-        segments.removeAll()
+        sessionState.clear()
         currentStroke = nil
         currentStrokeSegmentId = nil
-        undoStack.removeAll()
+        sessionState.undoStack.removeAll()
+        sessionState.redoPayloadStack.removeAll()
         telemetry = Telemetry()
         didShowSavedToastThisSession = false
         sessionManager.deleteSession()
+        radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         setNeedsDisplay()
     }
 
@@ -721,6 +743,7 @@ private final class TapeCanvasUIView: UIView {
         configureMenuTriggerButton()
         _ = radialMenu
         radialMenu.syncPaletteIndex()
+        radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
         _ = toastManager // Initialize toast manager
         registerForAppLifecycle()
         if sessionManager.shouldAutoloadOnLaunch() {
@@ -729,6 +752,9 @@ private final class TapeCanvasUIView: UIView {
         applySavedBrushSettings()
         sessionManager.startPeriodicSaveTimerIfNeeded { [weak self] in
             self?.saveSession()
+        }
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: TapeCanvasUIView, previousTraitCollection: UITraitCollection) in
+            self?.handleUserInterfaceStyleChange(previous: previousTraitCollection)
         }
     }
 
@@ -745,6 +771,12 @@ private final class TapeCanvasUIView: UIView {
             } else {
                 let safeIdx = min(max(0, idx), primaryColorPalette.count - 1)
                 baseStrokeColor = primaryColorPalette[safeIdx]
+            }
+            let isDark = traitCollection.userInterfaceStyle == .dark
+            let isFirstPrimary = (idx == 0)
+            let isFirstAchievement = (idx == primaryColorPalette.count)
+            if isDark && (isFirstPrimary || isFirstAchievement) {
+                baseStrokeColor = .white
             }
         }
         if defaults.object(forKey: SettingsKeys.baseLineWidth) != nil {
@@ -767,7 +799,7 @@ private final class TapeCanvasUIView: UIView {
         let palette = index == 0 ? primaryColorPalette : achievementColorPalette
         radialMenu.updateColorPalette(palette)
         if let lastPaletteIndex, lastPaletteIndex != index {
-            let message = index == 0 ? "Original colors restored" : "New colors unlocked"
+            let message = index == 0 ? NSLocalizedString("toast.original_colors_restored", comment: "Original colors restored") : NSLocalizedString("toast.new_colors_unlocked", comment: "New colors unlocked")
             showToast(text: message, type: .success)
         }
         lastPaletteIndex = index
@@ -846,11 +878,11 @@ private final class TapeCanvasUIView: UIView {
             menuTriggerButton.imageView?.contentMode = .scaleAspectFit
         } else {
             menuTriggerButton.setTitle("∞", for: .normal)
-            menuTriggerButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .largeTitle)
+            menuTriggerButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .title1)
             menuTriggerButton.titleLabel?.adjustsFontForContentSizeCategory = true
         }
-        menuTriggerButton.accessibilityLabel = "Open radial menu"
-        menuTriggerButton.accessibilityHint = "Double-tap to open the radial menu. Drag to move the button."
+        menuTriggerButton.accessibilityLabel = NSLocalizedString("accessibility.menu_trigger_label", comment: "Open radial menu")
+        menuTriggerButton.accessibilityHint = NSLocalizedString("accessibility.menu_trigger_hint", comment: "Double-tap to open the radial menu. Drag to move the button.")
         menuTriggerButton.accessibilityTraits.insert(.button)
         menuTriggerButton.addAction(UIAction { [weak self] _ in
             self?.showMenuAtCenter()
@@ -859,6 +891,7 @@ private final class TapeCanvasUIView: UIView {
         menuTriggerButton.isUserInteractionEnabled = true
         updateMenuTriggerButtonAppearance()
         addSubview(menuTriggerButton)
+        menuTriggerButton.layer.zPosition = 2000
     }
 
     private func updateMenuTriggerButtonAppearance() {
@@ -899,19 +932,3 @@ private struct Telemetry {
     }
 }
 
-private extension UIColor {
-    func toStoredColor() -> StoredColor {
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        return StoredColor(red: red, green: green, blue: blue, alpha: alpha)
-    }
-}
-
-private extension StoredColor {
-    func toUIColor() -> UIColor {
-        UIColor(red: red, green: green, blue: blue, alpha: alpha)
-    }
-}

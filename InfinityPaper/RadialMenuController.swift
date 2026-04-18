@@ -4,12 +4,13 @@ final class RadialMenuController {
     private unowned let host: UIView
     private var graphiteColor: UIColor
     private var colorSubPalette: [UIColor]
-    private let setBaseStrokeColor: (UIColor) -> Void
+    private let setBaseStrokeColor: (UIColor, Int) -> Void
     private let cycleLineWidth: () -> Void
     private let onClearLastSession: () -> Void
     private let onExport: () -> Void
     private let onSettings: () -> Void
     private let onSparkles: () -> Void
+    private let onRedo: () -> Void
     private let onPaletteIndexChanged: (Int) -> Void
 
     private let menuView = UIView()
@@ -20,7 +21,10 @@ final class RadialMenuController {
     private let exportButton = UIButton(type: .system)
     private let settingsButton = UIButton(type: .system)
     private let sparklesButton = UIButton(type: .system)
+    private let redoButton = UIButton(type: .system)
     private var colorButtons: [UIButton] = []
+    /// When set (e.g. .white in dark mode), first color slot in the color menu uses this for display instead of palette[0].
+    private var firstColorMenuTintOverride: UIColor?
     private let menuCenterKeyX = "radialMenu.center.x"
     private let menuCenterKeyY = "radialMenu.center.y"
     private let bounceCountKey = "radialMenu.bounce.count"
@@ -112,12 +116,13 @@ final class RadialMenuController {
         host: UIView,
         graphiteColor: UIColor,
         colorSubPalette: [UIColor],
-        setBaseStrokeColor: @escaping (UIColor) -> Void,
+        setBaseStrokeColor: @escaping (UIColor, Int) -> Void,
         cycleLineWidth: @escaping () -> Void,
         onClearLastSession: @escaping () -> Void,
         onExport: @escaping () -> Void,
         onSettings: @escaping () -> Void,
         onSparkles: @escaping () -> Void,
+        onRedo: @escaping () -> Void,
         onPaletteIndexChanged: @escaping (Int) -> Void
     ) {
         self.host = host
@@ -129,6 +134,7 @@ final class RadialMenuController {
         self.onExport = onExport
         self.onSettings = onSettings
         self.onSparkles = onSparkles
+        self.onRedo = onRedo
         self.onPaletteIndexChanged = onPaletteIndexChanged
 
         loadMenuCenter()
@@ -146,7 +152,10 @@ final class RadialMenuController {
     }
 
     /// Updates button colors for dark mode. Called when trait collection changes.
-    func updateColorsForDarkMode(graphiteColor: UIColor) {
+    /// - Parameters:
+    ///   - graphiteColor: Tint for main menu icons (e.g. light in dark mode).
+    ///   - firstColorMenuTint: If set, used for the first slot in the color radial menu (e.g. .white in dark mode so graphite is visible).
+    func updateColorsForDarkMode(graphiteColor: UIColor, firstColorMenuTint: UIColor? = nil) {
         self.graphiteColor = graphiteColor
         // Update all button tint colors
         colorButton.tintColor = graphiteColor
@@ -155,9 +164,27 @@ final class RadialMenuController {
         exportButton.tintColor = graphiteColor
         settingsButton.tintColor = graphiteColor
         sparklesButton.tintColor = graphiteColor
+        redoButton.tintColor = graphiteColor
         // Update color button icon
         colorButton.setImage(makeColorDotsIcon(), for: .normal)
         widthButton.setImage(makeLineWidthIcon(), for: .normal)
+        firstColorMenuTintOverride = firstColorMenuTint
+        applyFirstColorMenuTintOverride()
+    }
+
+    /// Applies firstColorMenuTintOverride to the first color button if set; otherwise restores palette color.
+    private func applyFirstColorMenuTintOverride() {
+        guard let firstButton = colorButtons.first else { return }
+        let tint: UIColor
+        if let override = firstColorMenuTintOverride {
+            tint = override
+        } else if !colorSubPalette.isEmpty {
+            tint = colorSubPalette[0]
+        } else {
+            return
+        }
+        firstButton.tintColor = tint
+        firstButton.imageView?.tintColor = tint
     }
 
     func showMenuAtCenter() {
@@ -185,7 +212,7 @@ final class RadialMenuController {
             view: menuView,
             size: MenuLayout.menuSize,
             radius: MenuLayout.menuRadius,
-            slots: [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton],
+            slots: [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton, redoButton],
             buttonSize: buttonSize
         )
         layoutMenuSlots(
@@ -219,6 +246,7 @@ final class RadialMenuController {
         exportButton.accessibilityHint = verbose ? "Double-tap to share or save your drawing as a file (PDF or PNG, depending on settings)." : "Share or save your drawing"
         settingsButton.accessibilityHint = verbose ? "Double-tap to show app name and version." : "App name and version"
         sparklesButton.accessibilityHint = verbose ? "Double-tap to undo the last stroke." : "Undo last stroke"
+        redoButton.accessibilityHint = verbose ? "Double-tap to redo the last undone stroke." : "Redo last undone stroke"
         for button in colorButtons {
             button.accessibilityHint = verbose ? "Double-tap to select this color for the brush." : "Selects this color"
         }
@@ -253,7 +281,7 @@ final class RadialMenuController {
             }
             colorSubPalette = colors
             colorButton.setImage(makeColorDotsIcon(), for: .normal)
-            // Relayout immediately if visible
+            applyFirstColorMenuTintOverride()
             layout(in: host.bounds)
             return
         }
@@ -266,6 +294,7 @@ final class RadialMenuController {
                 imageView.tintColor = color
             }
         }
+        applyFirstColorMenuTintOverride()
         colorButton.setImage(makeColorDotsIcon(), for: .normal)
     }
 
@@ -324,8 +353,14 @@ final class RadialMenuController {
             tintColor: graphiteColor,
             action: { [weak self] in self?.handleSparklesTap() }
         )
+        configureTapButton(
+            redoButton,
+            imageSystemName: "arrow.uturn.forward",
+            tintColor: graphiteColor,
+            action: { [weak self] in self?.handleRedoTap() }
+        )
 
-        [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton].forEach {
+        [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton, redoButton].forEach {
             $0.backgroundColor = .clear
             $0.layer.cornerRadius = 0
             $0.frame.size = CGSize(width: MenuLayout.buttonSize, height: MenuLayout.buttonSize)
@@ -364,7 +399,7 @@ final class RadialMenuController {
 
     private func handleColorSelect(index: Int) {
         guard colorSubPalette.indices.contains(index) else { return }
-        setBaseStrokeColor(colorSubPalette[index])
+        setBaseStrokeColor(colorSubPalette[index], index)
         hideMenuAfterSelection()
     }
 
@@ -390,6 +425,11 @@ final class RadialMenuController {
 
     private func handleSparklesTap() {
         onSparkles()
+        hideMenuAfterSelection()
+    }
+
+    private func handleRedoTap() {
+        onRedo()
         hideMenuAfterSelection()
     }
 
@@ -446,6 +486,9 @@ final class RadialMenuController {
         } else if button === sparklesButton {
             button.accessibilityLabel = "Undo"
             button.accessibilityHint = "Undo last stroke"
+        } else if button === redoButton {
+            button.accessibilityLabel = "Redo"
+            button.accessibilityHint = "Redo last undone stroke"
         }
 
         button.addAction(UIAction { [weak self] _ in
@@ -516,7 +559,7 @@ final class RadialMenuController {
     }
 
     private var mainMenuButtons: [UIButton] {
-        [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton]
+        [colorButton, widthButton, eraserButton, settingsButton, exportButton, sparklesButton, redoButton]
     }
 
     /// Runs the shared reveal animation for a menu container and its buttons.
@@ -733,6 +776,13 @@ final class RadialMenuController {
 
     func syncPaletteIndex() {
         onPaletteIndexChanged(paletteIndex)
+    }
+
+    func updateActionAvailability(undoEnabled: Bool, redoEnabled: Bool) {
+        sparklesButton.isEnabled = undoEnabled
+        redoButton.isEnabled = redoEnabled
+        sparklesButton.alpha = undoEnabled ? 1.0 : 0.5
+        redoButton.alpha = redoEnabled ? 1.0 : 0.5
     }
 
     private func saveBounceProgress() {

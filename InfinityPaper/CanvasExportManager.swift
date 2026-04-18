@@ -11,6 +11,16 @@ import OSLog
 /// Manages export operations for the canvas.
 final class CanvasExportManager {
     private let logger = Logger(subsystem: "com.infinitypaper", category: "Export")
+
+    /// Removes characters unsafe for file names; returns a non-empty prefix suitable for export names.
+    static func sanitizedExportPrefix(_ raw: String?) -> String {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let invalid = CharacterSet(charactersIn: "/\\:?%*|\"<>\n\r")
+        let scalars = trimmed.unicodeScalars.filter { !invalid.contains($0) }
+        let cleaned = String(String.UnicodeScalarView(scalars))
+        if cleaned.isEmpty { return "InfinityPaper_" }
+        return cleaned
+    }
     
     private enum ExportKeys {
         static let format = "settings.export.format"
@@ -28,12 +38,54 @@ final class CanvasExportManager {
     /// Callback type for drawing noise during export.
     typealias DrawNoiseCallback = (CGContext, CGRect) -> Void
     
-    /// Exports the visible canvas area.
+    /// Exports the entire drawing in `worldBounds` (already padded for stroke width by the caller).
+    /// For viewport-only export, use `exportVisible`.
+    func exportFull(
+        worldBounds: CGRect,
+        backgroundColor: UIColor,
+        drawStrokesWorld: @escaping DrawStrokesCallback,
+        presentShare: @escaping (URL) -> Void,
+        showToast: @escaping (String, ToastType) -> Void
+    ) {
+        let defaults = UserDefaults.standard
+        let formatRaw = defaults.string(forKey: ExportKeys.format) ?? ExportFormat.pdf.rawValue
+        let format = ExportFormat(rawValue: formatRaw) ?? .pdf
+
+        if format == .png {
+            let resolution = defaults.object(forKey: ExportKeys.resolution) != nil
+                ? CGFloat(defaults.double(forKey: ExportKeys.resolution))
+                : 2.0
+            let includeNoise = defaults.object(forKey: ExportKeys.includeNoise) == nil
+                || defaults.bool(forKey: ExportKeys.includeNoise)
+            let transparent = defaults.object(forKey: ExportKeys.transparent) != nil
+                && defaults.bool(forKey: ExportKeys.transparent)
+            exportFullPNG(
+                backgroundColor: backgroundColor,
+                worldBounds: worldBounds,
+                resolution: resolution,
+                includeNoise: includeNoise,
+                transparent: transparent,
+                drawStrokesWorld: drawStrokesWorld,
+                presentShare: presentShare,
+                showToast: showToast
+            )
+        } else {
+            exportFullPDF(
+                backgroundColor: backgroundColor,
+                worldBounds: worldBounds,
+                drawStrokesWorld: drawStrokesWorld,
+                presentShare: presentShare,
+                showToast: showToast
+            )
+        }
+    }
+
+    /// Exports the currently visible viewport (honors scroll `contentOffset`). Full-canvas export uses `exportFull`.
     /// - Parameters:
-    ///   - bounds: The canvas bounds
-    ///   - contentOffset: The current scroll offset
+    ///   - bounds: The view bounds (viewport size)
+    ///   - contentOffset: The current scroll offset in world space
     ///   - backgroundColor: The background color for export
-    ///   - drawStrokes: Callback to draw strokes in the provided context
+    ///   - drawStrokes: Callback to draw strokes in the provided context (viewport coordinates)
     ///   - drawNoise: Callback to draw noise in the provided context and rect
     ///   - presentShare: Callback to present the share sheet with the exported file URL
     ///   - showToast: Callback to show toast messages
@@ -49,7 +101,7 @@ final class CanvasExportManager {
         let defaults = UserDefaults.standard
         let formatRaw = defaults.string(forKey: ExportKeys.format) ?? ExportFormat.pdf.rawValue
         let format = ExportFormat(rawValue: formatRaw) ?? .pdf
-        
+
         if format == .png {
             exportVisiblePNG(
                 bounds: bounds,
@@ -149,19 +201,19 @@ final class CanvasExportManager {
                 UIGraphicsGetCurrentContext()?.fill(rect)
             }
             
-            if includeNoise && !transparent {
-                let ctx = UIGraphicsGetCurrentContext()
-                ctx?.saveGState()
-                ctx?.translateBy(x: margin, y: margin)
-                drawNoise(ctx!, CGRect(origin: .zero, size: contentSize))
-                ctx?.restoreGState()
+            if includeNoise && !transparent, let noiseCtx = UIGraphicsGetCurrentContext() {
+                noiseCtx.saveGState()
+                noiseCtx.translateBy(x: margin, y: margin)
+                drawNoise(noiseCtx, CGRect(origin: .zero, size: contentSize))
+                noiseCtx.restoreGState()
             }
-            
-            let ctx = UIGraphicsGetCurrentContext()!
-            ctx.saveGState()
-            ctx.translateBy(x: margin - contentOffset.x, y: margin - contentOffset.y)
-            drawStrokes(ctx)
-            ctx.restoreGState()
+
+            if let strokeCtx = UIGraphicsGetCurrentContext() {
+                strokeCtx.saveGState()
+                strokeCtx.translateBy(x: margin - contentOffset.x, y: margin - contentOffset.y)
+                drawStrokes(strokeCtx)
+                strokeCtx.restoreGState()
+            }
         }
         
         guard let data = image.pngData() else {
@@ -185,11 +237,97 @@ final class CanvasExportManager {
         }
     }
     
+    private func exportFullPDF(
+        backgroundColor: UIColor,
+        worldBounds: CGRect,
+        drawStrokesWorld: @escaping DrawStrokesCallback,
+        presentShare: @escaping (URL) -> Void,
+        showToast: @escaping (String, ToastType) -> Void
+    ) {
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: worldBounds.size))
+        let data = renderer.pdfData { context in
+            context.beginPage()
+            let cgContext = context.cgContext
+            cgContext.setFillColor(backgroundColor.cgColor)
+            cgContext.fill(CGRect(origin: .zero, size: worldBounds.size))
+            cgContext.translateBy(x: -worldBounds.origin.x, y: -worldBounds.origin.y)
+            drawStrokesWorld(cgContext)
+        }
+        
+        let name = exportFileName(extension: "pdf")
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        
+        do {
+            try data.write(to: tempURL, options: Data.WritingOptions.atomic)
+            presentShare(tempURL)
+            showToast("Full PDF exported", .success)
+        } catch {
+            logger.error("Export full PDF write failed: \(error.localizedDescription)")
+            showToast("Export failed", .error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+    
+    private func exportFullPNG(
+        backgroundColor: UIColor,
+        worldBounds: CGRect,
+        resolution: CGFloat,
+        includeNoise: Bool,
+        transparent: Bool,
+        drawStrokesWorld: @escaping DrawStrokesCallback,
+        presentShare: @escaping (URL) -> Void,
+        showToast: @escaping (String, ToastType) -> Void
+    ) {
+        let imageSize = CGSize(width: worldBounds.size.width, height: worldBounds.size.height)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = resolution
+        let renderer = UIGraphicsImageRenderer(size: imageSize, format: format)
+        
+        let image = renderer.image { _ in
+            let rect = CGRect(origin: .zero, size: imageSize)
+            if transparent {
+                UIColor.clear.setFill()
+                UIGraphicsGetCurrentContext()?.fill(rect)
+            } else {
+                backgroundColor.setFill()
+                UIGraphicsGetCurrentContext()?.fill(rect)
+            }
+            
+            // Skip noise for full export according to instruction
+
+            guard let ctx = UIGraphicsGetCurrentContext() else { return }
+            ctx.saveGState()
+            ctx.translateBy(x: -worldBounds.origin.x, y: -worldBounds.origin.y)
+            drawStrokesWorld(ctx)
+            ctx.restoreGState()
+        }
+        
+        guard let data = image.pngData() else {
+            logger.error("Export full PNG data failed")
+            showToast("Export failed", .error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return
+        }
+        
+        let name = exportFileName(extension: "png")
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        
+        do {
+            try data.write(to: tempURL, options: Data.WritingOptions.atomic)
+            presentShare(tempURL)
+            showToast("Full PNG exported", .success)
+        } catch {
+            logger.error("Export full PNG write failed: \(error.localizedDescription)")
+            showToast("Export failed", .error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+    
     private func exportFileName(extension ext: String) -> String {
         let defaults = UserDefaults.standard
         let autoName = defaults.object(forKey: ExportKeys.autoName) != nil
             && defaults.bool(forKey: ExportKeys.autoName)
-        let prefix = defaults.string(forKey: ExportKeys.prefix) ?? "InfinityPaper_"
+        let prefix = Self.sanitizedExportPrefix(defaults.string(forKey: ExportKeys.prefix))
         
         if autoName {
             let formatter = DateFormatter()
@@ -202,3 +340,4 @@ final class CanvasExportManager {
         return "InfinityPaper.\(ext)"
     }
 }
+

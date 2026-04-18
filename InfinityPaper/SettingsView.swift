@@ -79,7 +79,7 @@ struct SettingsView: View {
         _includeBackgroundNoise = State(initialValue: defaults.object(forKey: Keys.includeBackgroundNoise) != nil ? defaults.bool(forKey: Keys.includeBackgroundNoise) : true)
         _transparentBackground = State(initialValue: defaults.object(forKey: Keys.transparentBackground) != nil ? defaults.bool(forKey: Keys.transparentBackground) : false)
         _autoNameExports = State(initialValue: defaults.object(forKey: Keys.autoNameExports) != nil ? defaults.bool(forKey: Keys.autoNameExports) : true)
-        _exportPrefix = State(initialValue: defaults.string(forKey: Keys.exportPrefix) ?? "InfinityPaper_")
+        _exportPrefix = State(initialValue: CanvasExportManager.sanitizedExportPrefix(defaults.string(forKey: Keys.exportPrefix)))
         _hapticsEnabled = State(initialValue: defaults.object(forKey: Keys.hapticsEnabled) != nil ? defaults.bool(forKey: Keys.hapticsEnabled) : true)
         _radialMenuScale = State(initialValue: defaults.object(forKey: Keys.radialMenuScale) != nil ? CGFloat(defaults.double(forKey: Keys.radialMenuScale)) : 1.0)
         _radialAnimationSpeed = State(initialValue: defaults.object(forKey: Keys.radialAnimationSpeed) != nil ? CGFloat(defaults.double(forKey: Keys.radialAnimationSpeed)) : 1.0)
@@ -96,7 +96,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 Section(header: Text("Brush & Canvas")) {
                     colorPaletteSection
@@ -128,15 +128,15 @@ struct SettingsView: View {
 
                 Section(header: Text("Accessibility & UI")) {
                     Toggle("High contrast UI", isOn: $highContrastUI)
-                        .onChange(of: highContrastUI) { newValue in
+                        .onChange(of: highContrastUI) { _, newValue in
                             UserDefaults.standard.set(newValue, forKey: Keys.highContrastUI)
                         }
                     Toggle("Larger menu buttons", isOn: $largerMenuButtons)
-                        .onChange(of: largerMenuButtons) { newValue in
+                        .onChange(of: largerMenuButtons) { _, newValue in
                             UserDefaults.standard.set(newValue, forKey: Keys.largerMenuButtons)
                         }
                     Toggle("Verbose VoiceOver hints", isOn: $verboseAccessibilityHints)
-                        .onChange(of: verboseAccessibilityHints) { newValue in
+                        .onChange(of: verboseAccessibilityHints) { _, newValue in
                             UserDefaults.standard.set(newValue, forKey: Keys.verboseAccessibilityHints)
                         }
                 }
@@ -144,7 +144,7 @@ struct SettingsView: View {
                 Section(header: Text("About")) {
                     Text("InfinityPaper")
                     Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-")")
-                    if let websiteURL = URL(string: "https://example.com") {
+                    if let websiteURL = AppLinks.website {
                         Link("Website", destination: websiteURL)
                     }
                 }
@@ -161,7 +161,7 @@ struct SettingsView: View {
                 Text("Periodic").tag(AutosaveMode.periodic)
             }
             .pickerStyle(.segmented)
-            .onChange(of: autosaveMode) { newValue in
+            .onChange(of: autosaveMode) { _, newValue in
                 UserDefaults.standard.set(newValue.rawValue, forKey: Keys.autosaveMode)
             }
             Text("On background: save when you leave the app. Periodic: also save every 60 seconds.")
@@ -169,7 +169,7 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
 
             Toggle("Autoload previous session on launch", isOn: $autoloadOnLaunch)
-                .onChange(of: autoloadOnLaunch) { newValue in
+                .onChange(of: autoloadOnLaunch) { _, newValue in
                     UserDefaults.standard.set(newValue, forKey: Keys.autoloadOnLaunch)
                 }
             Text("When on, the last saved drawing is loaded at startup.")
@@ -214,7 +214,7 @@ struct SettingsView: View {
             } maximumValueLabel: {
                 Text("8.0")
             }
-            .onChange(of: baseLineWidth) { newValue in
+            .onChange(of: baseLineWidth) { _, newValue in
                 onLineWidthChanged(newValue)
                 UserDefaults.standard.set(Double(newValue), forKey: Keys.baseLineWidth)
             }
@@ -228,17 +228,8 @@ struct SettingsView: View {
                 Text("PNG").tag(ExportFormat.png)
             }
             .pickerStyle(.segmented)
-            .onChange(of: exportFormat) { newValue in
+            .onChange(of: exportFormat) { _, newValue in
                 UserDefaults.standard.set(newValue.rawValue, forKey: Keys.exportFormat)
-            }
-
-            HStack {
-                Text("Resolution")
-                Slider(value: $exportResolution, in: 1.0...4.0, step: 0.5)
-                Text(String(format: "x%.1f", exportResolution))
-            }
-            .onChange(of: exportResolution) { newValue in
-                UserDefaults.standard.set(Double(newValue), forKey: Keys.exportResolution)
             }
 
             HStack {
@@ -246,34 +237,49 @@ struct SettingsView: View {
                 Slider(value: $exportMargin, in: 0...64, step: 2)
                 Text("\(Int(exportMargin)) pt")
             }
-            .onChange(of: exportMargin) { newValue in
+            .onChange(of: exportMargin) { _, newValue in
                 UserDefaults.standard.set(Double(newValue), forKey: Keys.exportMargin)
             }
 
-            Toggle("Include background noise (PNG)", isOn: $includeBackgroundNoise)
-                .onChange(of: includeBackgroundNoise) { newValue in
-                    UserDefaults.standard.set(newValue, forKey: Keys.includeBackgroundNoise)
+            if exportFormat == .png {
+                HStack {
+                    Text("Resolution")
+                    Slider(value: $exportResolution, in: 1.0...4.0, step: 0.5)
+                    Text(String(format: "x%.1f", exportResolution))
                 }
-            Toggle("Transparent background (PNG)", isOn: $transparentBackground)
-                .onChange(of: transparentBackground) { newValue in
-                    UserDefaults.standard.set(newValue, forKey: Keys.transparentBackground)
+                .onChange(of: exportResolution) { _, newValue in
+                    UserDefaults.standard.set(Double(newValue), forKey: Keys.exportResolution)
                 }
 
+                Toggle("Include background noise (PNG)", isOn: $includeBackgroundNoise)
+                    .onChange(of: includeBackgroundNoise) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: Keys.includeBackgroundNoise)
+                    }
+                Toggle("Transparent background (PNG)", isOn: $transparentBackground)
+                    .onChange(of: transparentBackground) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: Keys.transparentBackground)
+                    }
+            }
+
             Toggle("Auto-name exports", isOn: $autoNameExports)
-                .onChange(of: autoNameExports) { newValue in
+                .onChange(of: autoNameExports) { _, newValue in
                     UserDefaults.standard.set(newValue, forKey: Keys.autoNameExports)
                 }
             TextField("Export prefix", text: $exportPrefix)
                 .textInputAutocapitalization(.never)
-                .onChange(of: exportPrefix) { newValue in
-                    UserDefaults.standard.set(newValue, forKey: Keys.exportPrefix)
+                .onChange(of: exportPrefix) { _, newValue in
+                    let sanitized = CanvasExportManager.sanitizedExportPrefix(newValue)
+                    if sanitized != newValue {
+                        exportPrefix = sanitized
+                    }
+                    UserDefaults.standard.set(sanitized, forKey: Keys.exportPrefix)
                 }
         }
     }
 
     private var hapticsSection: some View {
         Toggle("Haptics in menu", isOn: $hapticsEnabled)
-            .onChange(of: hapticsEnabled) { newValue in
+            .onChange(of: hapticsEnabled) { _, newValue in
                 UserDefaults.standard.set(newValue, forKey: Keys.hapticsEnabled)
             }
     }
@@ -285,7 +291,7 @@ struct SettingsView: View {
                 Slider(value: $radialMenuScale, in: 0.8...1.4, step: 0.05)
                 Text(String(format: "%.2f×", radialMenuScale))
             }
-            .onChange(of: radialMenuScale) { newValue in
+            .onChange(of: radialMenuScale) { _, newValue in
                 UserDefaults.standard.set(Double(newValue), forKey: Keys.radialMenuScale)
             }
 
@@ -294,11 +300,11 @@ struct SettingsView: View {
                 Slider(value: $radialAnimationSpeed, in: 0.5...1.5, step: 0.05)
                 Text(String(format: "%.2fx", radialAnimationSpeed))
             }
-            .onChange(of: radialAnimationSpeed) { newValue in
+            .onChange(of: radialAnimationSpeed) { _, newValue in
                 UserDefaults.standard.set(Double(newValue), forKey: Keys.radialAnimationSpeed)
             }
 
-            Button("Reset to defaults") {
+            Button("Reset menu size & animation speed") {
                 radialMenuScale = 1.0
                 radialAnimationSpeed = 1.0
                 UserDefaults.standard.set(1.0, forKey: Keys.radialMenuScale)

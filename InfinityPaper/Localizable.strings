@@ -1,0 +1,25 @@
+/* Localizable.strings */
+
+"app.name" = "Infinity Paper";
+"app.tagline" = "A quiet strip of paper for your mind.";
+"app.version_format" = "Version %@";
+
+"splash.whisper" = "Think, scribble, let the tape roll.";
+
+"first_use.lead" = "Draw with one finger.";
+"first_use.body" = "Slide the paper with two. Tap ∞ when you want tools.";
+"first_use.dismiss" = "OK";
+
+"about.purpose" = "Not for lists or neat notes. A place to unload your head, doodle, and follow a line as far as it goes.";
+"about.sub" = "No pages to name. No pressure to finish.";
+
+"action.done" = "Done";
+"action.cancel" = "Cancel";
+"action.clear" = "Clear";
+"toast.saved" = "Saved";
+"toast.save_failed" = "Save failed";
+"toast.undo" = "Undo";
+"toast.redo" = "Redo";
+"toast.session_cleared" = "Session cleared";
+"alert.clear_title" = "Clear drawing?";
+"alert.clear_message" = "This will remove all strokes in current session. This cannot be undone.";

@@ -181,20 +181,21 @@ final class CanvasRenderer {
         let resolvedBg = backgroundColor.resolvedColor(with: traitCollection)
         let isDark = traitCollection.userInterfaceStyle == .dark
         return renderer.image { ctx in
-            let base = resolvedBg.withAlphaComponent(0.02)
-            base.setFill()
+            // Opaque paper base so tiled pattern is seamless with the canvas fill.
+            resolvedBg.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
-            
-            for _ in 0..<250 {
+
+            // Subtle grain only: low count, alpha ~0.012–0.032 (stays under ~0.04; no visible “texture photo”).
+            let dotCount = 95
+            for _ in 0..<dotCount {
                 let x = CGFloat.random(in: 0..<size)
                 let y = CGFloat.random(in: 0..<size)
-                let alpha = CGFloat.random(in: 0.015...0.05)
-                // In dark mode, use lighter dots; in light mode, use darker dots
+                let alpha = CGFloat.random(in: 0.012...0.032)
                 let dotColor = isDark
                     ? UIColor(white: 1.0, alpha: alpha)
                     : UIColor(white: 0.0, alpha: alpha)
                 ctx.cgContext.setFillColor(dotColor.cgColor)
-                ctx.cgContext.fillEllipse(in: CGRect(x: x, y: y, width: 1.2, height: 1.2))
+                ctx.cgContext.fillEllipse(in: CGRect(x: x, y: y, width: 0.85, height: 0.85))
             }
         }
     }
