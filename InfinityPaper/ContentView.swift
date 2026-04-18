@@ -5,6 +5,7 @@
 //  Created by Gazza on 17. 1. 2026..
 //
 
+import OSLog
 import SwiftUI
 
 struct ContentView: View {
@@ -143,6 +144,12 @@ private final class TapeCanvasUIView: UIView {
     private var currentStroke: TapeSessionStroke?
     private var currentStrokeSegmentId: Int?
     private var contentOffset: CGPoint = .zero
+    /// Avoid overlapping `saveSession` work (timer + resign active); coalesce to one follow-up save if needed.
+    private var sessionSaveInFlight = false
+    private var sessionSaveCoalesceRequested = false
+#if DEBUG
+    private static let saveDiagnostics = Logger(subsystem: "com.infinitypaper", category: "TapeCanvas")
+#endif
     private var displayLink: CADisplayLink?
     private var autoScrollLink: CADisplayLink?
     private var lastTouchLocation: CGPoint?
@@ -531,6 +538,19 @@ private final class TapeCanvasUIView: UIView {
     }
 
     private func saveSession() {
+        guard sessionState.hasUnsavedChanges else {
+#if DEBUG
+            Self.saveDiagnostics.debug("saveSession skipped: nothing to persist")
+#endif
+            return
+        }
+        if sessionSaveInFlight {
+            sessionSaveCoalesceRequested = true
+            return
+        }
+        sessionSaveInFlight = true
+        sessionSaveCoalesceRequested = false
+        let tokenSnapshot = sessionState.persistenceToken
         let storedSession = sessionState.buildStoredSession(
             contentOffset: contentOffset,
             savedAt: Date().timeIntervalSince1970
@@ -538,13 +558,21 @@ private final class TapeCanvasUIView: UIView {
 
         sessionManager.saveSession(storedSession) { [weak self] result in
             guard let self else { return }
+            self.sessionSaveInFlight = false
             switch result {
             case .success:
+                self.sessionState.acknowledgePersistenceSave(succeededWithToken: tokenSnapshot)
                 if !self.didShowSavedToastThisSession {
                     self.didShowSavedToastThisSession = true
                     self.showToast(text: NSLocalizedString("toast.saved", comment: "Saved"), type: .success)
                 }
+                let needsAnother = self.sessionState.hasUnsavedChanges || self.sessionSaveCoalesceRequested
+                self.sessionSaveCoalesceRequested = false
+                if needsAnother {
+                    self.saveSession()
+                }
             case .failure:
+                self.sessionSaveCoalesceRequested = false
                 self.showToast(text: NSLocalizedString("toast.save_failed", comment: "Save failed"), type: .error)
             }
         }
@@ -744,8 +772,6 @@ private final class TapeCanvasUIView: UIView {
         sessionState.clear()
         currentStroke = nil
         currentStrokeSegmentId = nil
-        sessionState.undoStack.removeAll()
-        sessionState.redoPayloadStack.removeAll()
         telemetry = Telemetry()
         didShowSavedToastThisSession = false
         sessionManager.deleteSession()

@@ -26,6 +26,13 @@ struct TapeSessionSegment {
 
 /// Owns persisted stroke data per horizontal segment, plus undo/redo stacks.
 final class TapeCanvasSessionState {
+    /// Bumped on every change that should eventually hit disk; avoids clearing the dirty flag if content changed mid-save.
+    private(set) var persistenceToken: UInt64 = 0
+    /// Whether there are changes not yet reflected in a successful save completion.
+    private(set) var hasUnsavedChanges: Bool = false
+    /// Redo holds full stroke copies; cap avoids unbounded memory after many undos without a new stroke.
+    private static let maxRedoPayloadEntries = 256
+
     /// Source of truth for completed strokes (keyed by segment column index).
     var segments: [Int: TapeSessionSegment] = [:]
     /// Stack of (segmentId, strokeIndex) for completed strokes; used for Undo.
@@ -37,6 +44,19 @@ final class TapeCanvasSessionState {
         segments.removeAll()
         undoStack.removeAll()
         redoPayloadStack.removeAll()
+        persistenceToken = 0
+        hasUnsavedChanges = false
+    }
+
+    private func noteMutationForPersistence() {
+        persistenceToken &+= 1
+        hasUnsavedChanges = true
+    }
+
+    /// Call after a successful save when no newer mutations occurred since `tokenSnapshot`.
+    func acknowledgePersistenceSave(succeededWithToken tokenSnapshot: UInt64) {
+        guard tokenSnapshot == persistenceToken else { return }
+        hasUnsavedChanges = false
     }
 
     func segmentId(forWorldX worldX: CGFloat, segmentWidth: CGFloat) -> Int {
@@ -151,6 +171,8 @@ final class TapeCanvasSessionState {
         })
         undoStack.removeAll()
         redoPayloadStack.removeAll()
+        persistenceToken = 0
+        hasUnsavedChanges = false
     }
 
     func commitCompletedStroke(segmentId: Int, stroke: TapeSessionStroke) {
@@ -159,6 +181,7 @@ final class TapeCanvasSessionState {
         segments[segmentId] = segment
         undoStack.append((segmentId, segment.strokes.count - 1))
         redoPayloadStack.removeAll()
+        noteMutationForPersistence()
     }
 
     @discardableResult
@@ -172,6 +195,10 @@ final class TapeCanvasSessionState {
             segments[last.segmentId] = segment
         }
         redoPayloadStack.append((segmentId: last.segmentId, strokeIndex: last.strokeIndex, stroke: removed))
+        while redoPayloadStack.count > Self.maxRedoPayloadEntries {
+            redoPayloadStack.removeFirst()
+        }
+        noteMutationForPersistence()
         return true
     }
 
@@ -183,6 +210,7 @@ final class TapeCanvasSessionState {
         segment.strokes.insert(item.stroke, at: index)
         segments[item.segmentId] = segment
         undoStack.append((segmentId: item.segmentId, strokeIndex: index))
+        noteMutationForPersistence()
         return true
     }
 }

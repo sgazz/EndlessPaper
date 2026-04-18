@@ -22,6 +22,9 @@ final class CanvasExportManager {
         return cleaned
     }
     
+    /// Longest edge in **logical** points after `format.scale`; avoids multi‑hundred‑MB bitmaps on huge sessions.
+    private static let exportFullMaxPixelSide: CGFloat = 8192
+
     private enum ExportKeys {
         static let format = "settings.export.format"
         static let resolution = "settings.export.resolution"
@@ -280,7 +283,17 @@ final class CanvasExportManager {
     ) {
         let imageSize = CGSize(width: worldBounds.size.width, height: worldBounds.size.height)
         let format = UIGraphicsImageRendererFormat()
-        format.scale = resolution
+        let longLogical = max(imageSize.width, imageSize.height)
+        let effectiveScale: CGFloat
+        if longLogical > 0, longLogical * resolution > Self.exportFullMaxPixelSide {
+            effectiveScale = max(1, (Self.exportFullMaxPixelSide / longLogical).rounded(.down))
+            if effectiveScale + 0.001 < resolution {
+                logger.debug("Full PNG export: scale reduced \(resolution) → \(effectiveScale) to cap bitmap size")
+            }
+        } else {
+            effectiveScale = resolution
+        }
+        format.scale = effectiveScale
         let renderer = UIGraphicsImageRenderer(size: imageSize, format: format)
         
         let image = renderer.image { _ in
