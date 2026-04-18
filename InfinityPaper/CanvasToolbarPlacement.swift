@@ -16,7 +16,12 @@ enum CanvasToolbarDock: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// Center of the toolbar when docked to this edge (toolbar stays horizontal).
+    /// Leading/trailing docks use a vertical control column; top/bottom use a horizontal strip.
+    var usesVerticalToolbarLayout: Bool {
+        self == .leading || self == .trailing
+    }
+
+    /// Center of the toolbar when docked to this edge (`toolbarSize` should match current horizontal vs vertical layout).
     func dockedCenter(
         toolbarSize: CGSize,
         containerSize: CGSize,

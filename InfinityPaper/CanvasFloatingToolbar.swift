@@ -214,8 +214,6 @@ struct CanvasFloatingToolbar: View {
     var onSettings: () -> Void
     var onMoreAbout: () -> Void
     var onRequestClearCanvas: () -> Void
-    var onToolbarDragChanged: (CGSize) -> Void
-    var onToolbarDragEnded: (CGSize) -> Void
 
     @State private var showColorPicker = false
     @State private var showWidthPicker = false
@@ -224,8 +222,11 @@ struct CanvasFloatingToolbar: View {
         UIDevice.current.userInterfaceIdiom == .pad || horizontalSizeClass == .regular
     }
 
+    private var isVertical: Bool { dock.usesVerticalToolbarLayout }
+
     private var capsuleHPadding: CGFloat { isPad ? 22 : 14 }
     private var interItemSpacing: CGFloat { isPad ? 14 : 10 }
+    private var verticalItemSpacing: CGFloat { isPad ? 12 : 10 }
     private var iconFrame: CGFloat { isPad ? 40 : 34 }
 
     private var capsuleFill: Color {
@@ -252,140 +253,40 @@ struct CanvasFloatingToolbar: View {
 
     private var popoverArrow: Edge { dock.popoverArrowEdge }
 
-    private var dragHandle: some View {
-        RoundedRectangle(cornerRadius: 2, style: .continuous)
-            .fill(iconTint.opacity(0.28))
-            .frame(width: isPad ? 5 : 4, height: isPad ? 22 : 18)
-            .padding(.trailing, 2)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 4)
-                    .onChanged { onToolbarDragChanged($0.translation) }
-                    .onEnded { onToolbarDragEnded($0.translation) }
-            )
-            .accessibilityLabel(Text(String(localized: "toolbar.drag_a11y")))
-            .accessibilityHint(Text(String(localized: "toolbar.drag_a11y_hint")))
+    /// Non-interactive affordance; dragging is handled on the host with a screen-space `DragGesture`.
+    private var affordanceGrip: some View {
+        Group {
+            if isVertical {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(iconTint.opacity(0.22))
+                    .frame(width: isPad ? 22 : 18, height: isPad ? 5 : 4)
+            } else {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(iconTint.opacity(0.22))
+                    .frame(width: isPad ? 5 : 4, height: isPad ? 22 : 18)
+            }
+        }
+        .accessibilityHidden(true)
     }
 
     var body: some View {
-        HStack(spacing: interItemSpacing) {
-            dragHandle
-
-            Button {
-                showWidthPicker = false
-                showColorPicker = true
-            } label: {
-                ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: "paintpalette.fill")
-                        .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                        .frame(width: iconFrame, height: iconFrame)
-                    Circle()
-                        .fill(currentSwatchColor)
-                        .frame(width: isPad ? 11 : 9, height: isPad ? 11 : 9)
-                        .overlay(Circle().stroke(strokeLine, lineWidth: 0.5))
-                        .offset(x: 2, y: 2)
+        Group {
+            if isVertical {
+                VStack(spacing: verticalItemSpacing) {
+                    affordanceGrip
+                    controlButtons
                 }
-                .frame(width: iconFrame, height: iconFrame)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(String(localized: "toolbar.color")))
-            .popover(isPresented: $showColorPicker, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
-                ToolbarPickerPanel(isPad: isPad) {
-                    ToolbarColorPickerBody(
-                        colors: broker.paletteUIColors,
-                        selectedIndex: broker.selectedColorIndex,
-                        isPad: isPad,
-                        onPick: { idx in
-                            onSelectColor(idx)
-                            showColorPicker = false
-                        }
-                    )
+            } else {
+                HStack(spacing: interItemSpacing) {
+                    affordanceGrip
+                    controlButtons
                 }
-                .presentationCompactAdaptation(.popover)
             }
-
-            Button {
-                showColorPicker = false
-                showWidthPicker = true
-            } label: {
-                VStack(spacing: 1) {
-                    Image(systemName: "lineweight")
-                        .font(.system(size: isPad ? 17 : 15, weight: .medium))
-                    Text(broker.lineWidthLabel)
-                        .font(.system(size: isPad ? 9 : 8, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(width: iconFrame, height: iconFrame)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(String(localized: "toolbar.line_width")))
-            .popover(isPresented: $showWidthPicker, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
-                ToolbarPickerPanel(isPad: isPad) {
-                    ToolbarLineWidthPickerBody(
-                        presets: TapeCanvasUIView.toolbarWidthPresets,
-                        selectedIndex: broker.selectedWidthPresetIndex,
-                        isPad: isPad,
-                        sampleTint: iconTint,
-                        onPick: { idx in
-                            onSelectLineWidthPreset(idx)
-                            showWidthPicker = false
-                        }
-                    )
-                }
-                .presentationCompactAdaptation(.popover)
-            }
-
-            Button(action: onUndo) {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                    .frame(width: iconFrame, height: iconFrame)
-            }
-            .buttonStyle(.plain)
-            .disabled(!broker.undoEnabled)
-            .opacity(broker.undoEnabled ? 1 : 0.35)
-            .accessibilityLabel(Text(String(localized: "toolbar.undo")))
-
-            Button(action: onRedo) {
-                Image(systemName: "arrow.uturn.forward")
-                    .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                    .frame(width: iconFrame, height: iconFrame)
-            }
-            .buttonStyle(.plain)
-            .disabled(!broker.redoEnabled)
-            .opacity(broker.redoEnabled ? 1 : 0.35)
-            .accessibilityLabel(Text(String(localized: "toolbar.redo")))
-
-            Button(action: onExport) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                    .frame(width: iconFrame, height: iconFrame)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(String(localized: "toolbar.export")))
-
-            Button(action: onSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: isPad ? 18 : 16, weight: .medium))
-                    .frame(width: iconFrame, height: iconFrame)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(String(localized: "toolbar.settings")))
-
-            Menu {
-                Button(String(localized: "toolbar.clear_canvas"), role: .destructive, action: onRequestClearCanvas)
-                Button(String(localized: "toolbar.more_about"), action: onMoreAbout)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                    .frame(width: iconFrame - 2, height: iconFrame)
-            }
-            .menuStyle(.button)
-            .tint(iconTint)
-            .accessibilityLabel(Text(String(localized: "toolbar.more")))
         }
+        .animation(.easeInOut(duration: 0.22), value: dock)
         .foregroundStyle(iconTint)
-        .padding(.horizontal, capsuleHPadding)
-        .padding(.vertical, isPad ? 11 : 9)
+        .padding(.horizontal, isVertical ? (isPad ? 11 : 9) : capsuleHPadding)
+        .padding(.vertical, isVertical ? capsuleHPadding : (isPad ? 11 : 9))
         .background(
             Capsule(style: .continuous)
                 .fill(capsuleFill)
@@ -395,5 +296,122 @@ struct CanvasFloatingToolbar: View {
                 )
         )
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), radius: isPad ? 14 : 10, y: isPad ? 5 : 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityHint(Text(String(localized: "toolbar.drag_a11y_hint")))
+    }
+
+    @ViewBuilder
+    private var controlButtons: some View {
+        Button {
+            showWidthPicker = false
+            showColorPicker = true
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "paintpalette.fill")
+                    .font(.system(size: isPad ? 19 : 17, weight: .medium))
+                    .frame(width: iconFrame, height: iconFrame)
+                Circle()
+                    .fill(currentSwatchColor)
+                    .frame(width: isPad ? 11 : 9, height: isPad ? 11 : 9)
+                    .overlay(Circle().stroke(strokeLine, lineWidth: 0.5))
+                    .offset(x: 2, y: 2)
+            }
+            .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "toolbar.color")))
+        .popover(isPresented: $showColorPicker, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
+            ToolbarPickerPanel(isPad: isPad) {
+                ToolbarColorPickerBody(
+                    colors: broker.paletteUIColors,
+                    selectedIndex: broker.selectedColorIndex,
+                    isPad: isPad,
+                    onPick: { idx in
+                        onSelectColor(idx)
+                        showColorPicker = false
+                    }
+                )
+            }
+            .presentationCompactAdaptation(.popover)
+        }
+
+        Button {
+            showColorPicker = false
+            showWidthPicker = true
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: "lineweight")
+                    .font(.system(size: isPad ? 17 : 15, weight: .medium))
+                Text(broker.lineWidthLabel)
+                    .font(.system(size: isPad ? 9 : 8, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "toolbar.line_width")))
+        .popover(isPresented: $showWidthPicker, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
+            ToolbarPickerPanel(isPad: isPad) {
+                ToolbarLineWidthPickerBody(
+                    presets: TapeCanvasUIView.toolbarWidthPresets,
+                    selectedIndex: broker.selectedWidthPresetIndex,
+                    isPad: isPad,
+                    sampleTint: iconTint,
+                    onPick: { idx in
+                        onSelectLineWidthPreset(idx)
+                        showWidthPicker = false
+                    }
+                )
+            }
+            .presentationCompactAdaptation(.popover)
+        }
+
+        Button(action: onUndo) {
+            Image(systemName: "arrow.uturn.backward")
+                .font(.system(size: isPad ? 19 : 17, weight: .medium))
+                .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .disabled(!broker.undoEnabled)
+        .opacity(broker.undoEnabled ? 1 : 0.35)
+        .accessibilityLabel(Text(String(localized: "toolbar.undo")))
+
+        Button(action: onRedo) {
+            Image(systemName: "arrow.uturn.forward")
+                .font(.system(size: isPad ? 19 : 17, weight: .medium))
+                .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .disabled(!broker.redoEnabled)
+        .opacity(broker.redoEnabled ? 1 : 0.35)
+        .accessibilityLabel(Text(String(localized: "toolbar.redo")))
+
+        Button(action: onExport) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: isPad ? 19 : 17, weight: .medium))
+                .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "toolbar.export")))
+
+        Button(action: onSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: isPad ? 18 : 16, weight: .medium))
+                .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "toolbar.settings")))
+
+        Menu {
+            Button(String(localized: "toolbar.clear_canvas"), role: .destructive, action: onRequestClearCanvas)
+            Button(String(localized: "toolbar.more_about"), action: onMoreAbout)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: isPad ? 19 : 17, weight: .medium))
+                .frame(width: iconFrame - 2, height: iconFrame)
+        }
+        .menuStyle(.button)
+        .tint(iconTint)
+        .accessibilityLabel(Text(String(localized: "toolbar.more")))
     }
 }

@@ -96,7 +96,8 @@ private struct TapeCanvasView: View {
 
             GeometryReader { geo in
                 let safe = geo.safeAreaInsets
-                let docked = toolbarDock.dockedCenter(
+                let dock = CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
+                let docked = dock.dockedCenter(
                     toolbarSize: toolbarMeasuredSize,
                     containerSize: geo.size,
                     safeArea: safe,
@@ -111,7 +112,7 @@ private struct TapeCanvasView: View {
 
                     CanvasFloatingToolbar(
                         broker: toolbarBroker,
-                        dock: toolbarDock,
+                        dock: dock,
                         onSelectColor: { idx in
                             toolbarBroker.canvas?.toolbarSelectColor(at: idx)
                         },
@@ -135,23 +136,6 @@ private struct TapeCanvasView: View {
                             DispatchQueue.main.async {
                                 showClearCanvasConfirmation = true
                             }
-                        },
-                        onToolbarDragChanged: { t in
-                            dragTranslation = t
-                        },
-                        onToolbarDragEnded: { t in
-                            let finalCenter = CGPoint(x: docked.x + t.width, y: docked.y + t.height)
-                            let next = CanvasToolbarDock.nearestDock(
-                                finalCenter: finalCenter,
-                                toolbarSize: toolbarMeasuredSize,
-                                containerSize: geo.size,
-                                safeArea: safe,
-                                margin: toolbarEdgeMargin
-                            )
-                            withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                                toolbarDockRaw = next.rawValue
-                                dragTranslation = .zero
-                            }
                         }
                     )
                     .background(
@@ -164,9 +148,40 @@ private struct TapeCanvasView: View {
                     )
                     .position(display)
                     .allowsHitTesting(true)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 16, coordinateSpace: .named("toolbarDockSpace"))
+                            .onChanged { value in
+                                dragTranslation = value.translation
+                            }
+                            .onEnded { value in
+                                let dockNow = CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
+                                let dockedNow = dockNow.dockedCenter(
+                                    toolbarSize: toolbarMeasuredSize,
+                                    containerSize: geo.size,
+                                    safeArea: safe,
+                                    margin: toolbarEdgeMargin
+                                )
+                                let finalCenter = CGPoint(
+                                    x: dockedNow.x + value.translation.width,
+                                    y: dockedNow.y + value.translation.height
+                                )
+                                let next = CanvasToolbarDock.nearestDock(
+                                    finalCenter: finalCenter,
+                                    toolbarSize: toolbarMeasuredSize,
+                                    containerSize: geo.size,
+                                    safeArea: safe,
+                                    margin: toolbarEdgeMargin
+                                )
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                                    toolbarDockRaw = next.rawValue
+                                    dragTranslation = .zero
+                                }
+                            }
+                    )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .coordinateSpace(name: "toolbarDockSpace")
             .allowsHitTesting(true)
         }
         .onPreferenceChange(ToolbarSizePreferenceKey.self) { toolbarMeasuredSize = $0 }
