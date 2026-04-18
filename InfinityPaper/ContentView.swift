@@ -18,12 +18,31 @@ struct ContentView: View {
     }
 }
 
+private struct ToolbarSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = CGSize(width: 340, height: 52)
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
 private struct TapeCanvasView: View {
     @StateObject private var toolbarBroker = CanvasToolbarStateBroker()
     @State private var showAbout = false
     @State private var showSettings = false
     @AppStorage("firstUseOrientationDismissed") private var firstUseOrientationDismissed = false
     @State private var orientationHintOpacity: Double = 1
+
+    @AppStorage("settings.ui.toolbarDock") private var toolbarDockRaw: String = CanvasToolbarDock.top.rawValue
+    @State private var dragTranslation: CGSize = .zero
+    @State private var toolbarMeasuredSize: CGSize = ToolbarSizePreferenceKey.defaultValue
+    @State private var showClearCanvasConfirmation = false
+
+    private var toolbarDock: CanvasToolbarDock {
+        CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
+    }
+
+    private let toolbarEdgeMargin: CGFloat = 10
+    private let toolbarHintReserve: CGFloat = 56
 
     var body: some View {
         ZStack {
@@ -35,64 +54,134 @@ private struct TapeCanvasView: View {
             )
             .ignoresSafeArea()
 
-            VStack {
-                Spacer(minLength: 0)
-                if !firstUseOrientationDismissed {
-                    VStack(spacing: 10) {
-                        Text(NSLocalizedString("first_use.lead", comment: "First session one-line hint"))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Text(NSLocalizedString("first_use.body", comment: "First session second line"))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .multilineTextAlignment(.center)
-                        Button(NSLocalizedString("first_use.dismiss", comment: "Dismiss first-use hint")) {
-                            withAnimation(.easeOut(duration: 0.35)) {
-                                orientationHintOpacity = 0
+            GeometryReader { _ in
+                VStack {
+                    Spacer(minLength: 0)
+                    if !firstUseOrientationDismissed {
+                        let pad = toolbarDock.hintContentPadding(toolbarReserve: toolbarHintReserve)
+                        VStack(spacing: 10) {
+                            Text(NSLocalizedString("first_use.lead", comment: "First session one-line hint"))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Text(NSLocalizedString("first_use.body", comment: "First session second line"))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.center)
+                            Button(NSLocalizedString("first_use.dismiss", comment: "Dismiss first-use hint")) {
+                                withAnimation(.easeOut(duration: 0.35)) {
+                                    orientationHintOpacity = 0
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+                                    firstUseOrientationDismissed = true
+                                }
                             }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
-                                firstUseOrientationDismissed = true
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 28)
+                        .padding(.top, pad.top + 8)
+                        .padding(.bottom, pad.bottom + 8)
+                        .padding(.leading, pad.leading)
+                        .padding(.trailing, pad.trailing)
+                        .opacity(orientationHintOpacity)
+                        .allowsHitTesting(true)
+                        .transition(.opacity)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .allowsHitTesting(true)
+
+            GeometryReader { geo in
+                let safe = geo.safeAreaInsets
+                let docked = toolbarDock.dockedCenter(
+                    toolbarSize: toolbarMeasuredSize,
+                    containerSize: geo.size,
+                    safeArea: safe,
+                    margin: toolbarEdgeMargin
+                )
+                let display = CGPoint(x: docked.x + dragTranslation.width, y: docked.y + dragTranslation.height)
+
+                ZStack {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(false)
+
+                    CanvasFloatingToolbar(
+                        broker: toolbarBroker,
+                        dock: toolbarDock,
+                        onSelectColor: { idx in
+                            toolbarBroker.canvas?.toolbarSelectColor(at: idx)
+                        },
+                        onSelectLineWidthPreset: { idx in
+                            toolbarBroker.canvas?.toolbarSetLineWidthPreset(at: idx)
+                        },
+                        onUndo: {
+                            toolbarBroker.canvas?.toolbarUndo()
+                        },
+                        onRedo: {
+                            toolbarBroker.canvas?.toolbarRedo()
+                        },
+                        onExport: {
+                            toolbarBroker.canvas?.toolbarExport()
+                        },
+                        onSettings: {
+                            toolbarBroker.canvas?.toolbarOpenFullSettings()
+                        },
+                        onMoreAbout: { showAbout = true },
+                        onRequestClearCanvas: {
+                            DispatchQueue.main.async {
+                                showClearCanvasConfirmation = true
+                            }
+                        },
+                        onToolbarDragChanged: { t in
+                            dragTranslation = t
+                        },
+                        onToolbarDragEnded: { t in
+                            let finalCenter = CGPoint(x: docked.x + t.width, y: docked.y + t.height)
+                            let next = CanvasToolbarDock.nearestDock(
+                                finalCenter: finalCenter,
+                                toolbarSize: toolbarMeasuredSize,
+                                containerSize: geo.size,
+                                safeArea: safe,
+                                margin: toolbarEdgeMargin
+                            )
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                                toolbarDockRaw = next.rawValue
+                                dragTranslation = .zero
                             }
                         }
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 8)
-                    .opacity(orientationHintOpacity)
+                    )
+                    .background(
+                        GeometryReader { g in
+                            Color.clear.preference(
+                                key: ToolbarSizePreferenceKey.self,
+                                value: g.size
+                            )
+                        }
+                    )
+                    .position(display)
                     .allowsHitTesting(true)
-                    .transition(.opacity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .allowsHitTesting(true)
         }
-        .safeAreaInset(edge: .bottom, spacing: 10) {
-            CanvasFloatingToolbar(
-                broker: toolbarBroker,
-                onSelectColor: { idx in
-                    toolbarBroker.canvas?.toolbarSelectColor(at: idx)
-                },
-                onSelectLineWidthPreset: { idx in
-                    toolbarBroker.canvas?.toolbarSetLineWidthPreset(at: idx)
-                },
-                onUndo: {
-                    toolbarBroker.canvas?.toolbarUndo()
-                },
-                onRedo: {
-                    toolbarBroker.canvas?.toolbarRedo()
-                },
-                onExport: {
-                    toolbarBroker.canvas?.toolbarExport()
-                },
-                onSettings: {
-                    toolbarBroker.canvas?.toolbarOpenFullSettings()
-                },
-                onMoreAbout: { showAbout = true }
-            )
-            .padding(.horizontal, 20)
-            .padding(.bottom, 4)
+        .onPreferenceChange(ToolbarSizePreferenceKey.self) { toolbarMeasuredSize = $0 }
+        .confirmationDialog(
+            String(localized: "toolbar.clear_confirm_title"),
+            isPresented: $showClearCanvasConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "toolbar.clear_confirm_action"), role: .destructive) {
+                toolbarBroker.canvas?.toolbarClearCanvasConfirmed()
+                toolbarBroker.syncFromCanvas()
+            }
+            Button(String(localized: "action.cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "toolbar.clear_confirm_message"))
         }
         .sheet(isPresented: $showAbout) {
             AboutView(onDismiss: { showAbout = false })
@@ -192,9 +281,7 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
         view.onRequestSettings = onRequestSettings
         view.onOpenFullSettings = onOpenFullSettings
         view.onToolbarStateChange = { [weak toolbarBroker] in
-            DispatchQueue.main.async {
-                toolbarBroker?.syncFromCanvas()
-            }
+            toolbarBroker?.syncFromCanvas()
         }
         toolbarBroker.attach(view)
         onCanvasReady(view)
@@ -205,9 +292,7 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
         uiView.onRequestSettings = onRequestSettings
         uiView.onOpenFullSettings = onOpenFullSettings
         uiView.onToolbarStateChange = { [weak toolbarBroker] in
-            DispatchQueue.main.async {
-                toolbarBroker?.syncFromCanvas()
-            }
+            toolbarBroker?.syncFromCanvas()
         }
     }
 }
@@ -369,6 +454,12 @@ final class TapeCanvasUIView: UIView {
     func setBaseLineWidthFromSettings(_ width: CGFloat) { baseLineWidth = width }
     /// Called from Settings: show clear confirmation, then clear and toast.
     func confirmAndClearSessionFromSettings() { confirmAndClearSession() }
+
+    /// After SwiftUI confirmation from the toolbar “More” menu (no second alert).
+    func toolbarClearCanvasConfirmed() {
+        clearLastDrawingSession()
+        showToast(text: NSLocalizedString("toast.session_cleared", comment: "Session cleared"), type: .warning)
+    }
     /// Called from Settings: load the last saved session.
     func loadSessionFromSettings() {
         loadSession()

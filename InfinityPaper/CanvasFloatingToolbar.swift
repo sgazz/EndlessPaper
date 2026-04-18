@@ -28,7 +28,15 @@ final class CanvasToolbarStateBroker: ObservableObject {
         syncFromCanvas()
     }
 
+    /// Schedules a sync so `@Published` updates never run during SwiftUI view updates
+    /// (e.g. `UIViewRepresentable.makeUIView` calling `attach` → would warn otherwise).
     func syncFromCanvas() {
+        DispatchQueue.main.async { [weak self] in
+            self?.applySyncFromCanvas()
+        }
+    }
+
+    private func applySyncFromCanvas() {
         guard let canvas else {
             undoEnabled = false
             redoEnabled = false
@@ -194,6 +202,7 @@ private struct ToolbarLineWidthPickerBody: View {
 
 struct CanvasFloatingToolbar: View {
     @ObservedObject var broker: CanvasToolbarStateBroker
+    let dock: CanvasToolbarDock
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
 
@@ -204,6 +213,9 @@ struct CanvasFloatingToolbar: View {
     var onExport: () -> Void
     var onSettings: () -> Void
     var onMoreAbout: () -> Void
+    var onRequestClearCanvas: () -> Void
+    var onToolbarDragChanged: (CGSize) -> Void
+    var onToolbarDragEnded: (CGSize) -> Void
 
     @State private var showColorPicker = false
     @State private var showWidthPicker = false
@@ -238,8 +250,27 @@ struct CanvasFloatingToolbar: View {
         Color(uiColor: broker.strokePreviewUIColor)
     }
 
+    private var popoverArrow: Edge { dock.popoverArrowEdge }
+
+    private var dragHandle: some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(iconTint.opacity(0.28))
+            .frame(width: isPad ? 5 : 4, height: isPad ? 22 : 18)
+            .padding(.trailing, 2)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { onToolbarDragChanged($0.translation) }
+                    .onEnded { onToolbarDragEnded($0.translation) }
+            )
+            .accessibilityLabel(Text(String(localized: "toolbar.drag_a11y")))
+            .accessibilityHint(Text(String(localized: "toolbar.drag_a11y_hint")))
+    }
+
     var body: some View {
         HStack(spacing: interItemSpacing) {
+            dragHandle
+
             Button {
                 showWidthPicker = false
                 showColorPicker = true
@@ -258,7 +289,7 @@ struct CanvasFloatingToolbar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(String(localized: "toolbar.color")))
-            .popover(isPresented: $showColorPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            .popover(isPresented: $showColorPicker, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
                 ToolbarPickerPanel(isPad: isPad) {
                     ToolbarColorPickerBody(
                         colors: broker.paletteUIColors,
@@ -288,7 +319,7 @@ struct CanvasFloatingToolbar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(String(localized: "toolbar.line_width")))
-            .popover(isPresented: $showWidthPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            .popover(isPresented: $showWidthPicker, attachmentAnchor: .rect(.bounds), arrowEdge: popoverArrow) {
                 ToolbarPickerPanel(isPad: isPad) {
                     ToolbarLineWidthPickerBody(
                         presets: TapeCanvasUIView.toolbarWidthPresets,
@@ -341,6 +372,7 @@ struct CanvasFloatingToolbar: View {
             .accessibilityLabel(Text(String(localized: "toolbar.settings")))
 
             Menu {
+                Button(String(localized: "toolbar.clear_canvas"), role: .destructive, action: onRequestClearCanvas)
                 Button(String(localized: "toolbar.more_about"), action: onMoreAbout)
             } label: {
                 Image(systemName: "ellipsis.circle")

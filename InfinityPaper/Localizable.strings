@@ -7,7 +7,7 @@
 "splash.whisper" = "Think, scribble, let the tape roll.";
 
 "first_use.lead" = "Draw with one finger.";
-"first_use.body" = "Slide the paper with two. Tools sit in the bar below — or turn on the ∞ trigger in Settings for the classic radial menu.";
+"first_use.body" = "Slide the paper with two. Tools live in the bar along the edge (drag the grip to move it) — or turn on the ∞ trigger in Settings for the classic radial menu.";
 "first_use.dismiss" = "OK";
 
 "about.purpose" = "Not for lists or neat notes. A place to unload your head, doodle, and follow a line as far as it goes.";
@@ -30,8 +30,14 @@
 "toolbar.width_a11y_medium" = "Medium stroke";
 "toolbar.width_a11y_bold" = "Bold stroke";
 "toolbar.width_a11y_heavy" = "Heavy stroke";
+"toolbar.clear_canvas" = "Clear canvas…";
+"toolbar.clear_confirm_title" = "Clear this canvas?";
+"toolbar.clear_confirm_message" = "This removes every stroke in the current session. You can’t undo this step.";
+"toolbar.clear_confirm_action" = "Clear";
+"toolbar.drag_a11y" = "Move toolbar";
+"toolbar.drag_a11y_hint" = "Drag toward an edge to dock the toolbar.";
 
-"accessibility.canvas_hint_toolbar" = "Two-finger pan to move the tape. Use the bottom toolbar for colors, line width, undo, export, and settings.";
+"accessibility.canvas_hint_toolbar" = "Two-finger pan to move the tape. Use the edge toolbar for colors, line width, undo, export, and settings. Drag the narrow grip on the toolbar to move it to another edge.";
 "accessibility.canvas_hint_radial" = "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools.";
 "toast.saved" = "Saved";
 "toast.save_failed" = "Save failed";
