@@ -32,16 +32,12 @@ private struct TapeCanvasView: View {
     @AppStorage("firstUseOrientationDismissed") private var firstUseOrientationDismissed = false
     @State private var orientationHintOpacity: Double = 1
 
-    @AppStorage("settings.ui.toolbarDock") private var toolbarDockRaw: String = CanvasToolbarDock.top.rawValue
-    @State private var dragTranslation: CGSize = .zero
     @State private var toolbarMeasuredSize: CGSize = ToolbarSizePreferenceKey.defaultValue
     @State private var showClearCanvasConfirmation = false
     @State private var showNewSpaceConfirmation = false
     @State private var chromeHiddenForFocus = false
 
-    private var toolbarDock: CanvasToolbarDock {
-        CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
-    }
+    private var toolbarDock: CanvasToolbarDock { .top }
 
     /// Top/bottom dock: balanced offset from safe area (unchanged feel).
     private let toolbarTopBottomMargin: CGFloat = 11
@@ -101,7 +97,8 @@ private struct TapeCanvasView: View {
 
             GeometryReader { geo in
                 let safe = geo.safeAreaInsets
-                let dock = CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
+                let dock: CanvasToolbarDock = .top
+                let isiPhonePortrait = UIDevice.current.userInterfaceIdiom == .phone && geo.size.height > geo.size.width
                 let docked = dock.dockedCenter(
                     toolbarSize: toolbarMeasuredSize,
                     containerSize: geo.size,
@@ -109,7 +106,10 @@ private struct TapeCanvasView: View {
                     topBottomMargin: toolbarTopBottomMargin,
                     sideDockMargin: toolbarSideDockMargin
                 )
-                let display = CGPoint(x: docked.x + dragTranslation.width, y: docked.y + dragTranslation.height)
+                let display = CGPoint(
+                    x: docked.x,
+                    y: docked.y + (isiPhonePortrait ? toolbarMeasuredSize.height : 0)
+                )
 
                 ZStack {
                     Color.clear
@@ -137,10 +137,11 @@ private struct TapeCanvasView: View {
                         onSettings: {
                             toolbarBroker.canvas?.toolbarOpenFullSettings()
                         },
-                        onMoreAbout: { showAbout = true },
-                        onRequestClearCanvas: {
+                        onTogglePaperLock: {
                             DispatchQueue.main.async {
-                                showClearCanvasConfirmation = true
+                                guard let canvas = toolbarBroker.canvas else { return }
+                                canvas.toolbarSetPaperMovementLocked(!canvas.toolbarPaperMovementLocked)
+                                toolbarBroker.syncFromCanvas()
                             }
                         },
                         onInfinityClearCanvas: {
@@ -163,6 +164,9 @@ private struct TapeCanvasView: View {
                             withAnimation(.easeOut(duration: 0.28)) {
                                 chromeHiddenForFocus = true
                             }
+                        },
+                        onInfinityAbout: {
+                            showAbout = true
                         }
                     )
                     .background(
@@ -175,42 +179,9 @@ private struct TapeCanvasView: View {
                     )
                     .position(display)
                     .allowsHitTesting(true)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 16, coordinateSpace: .named("toolbarDockSpace"))
-                            .onChanged { value in
-                                dragTranslation = value.translation
-                            }
-                            .onEnded { value in
-                                let dockNow = CanvasToolbarDock(rawValue: toolbarDockRaw) ?? .top
-                                let dockedNow = dockNow.dockedCenter(
-                                    toolbarSize: toolbarMeasuredSize,
-                                    containerSize: geo.size,
-                                    safeArea: safe,
-                                    topBottomMargin: toolbarTopBottomMargin,
-                                    sideDockMargin: toolbarSideDockMargin
-                                )
-                                let finalCenter = CGPoint(
-                                    x: dockedNow.x + value.translation.width,
-                                    y: dockedNow.y + value.translation.height
-                                )
-                                let next = CanvasToolbarDock.nearestDock(
-                                    finalCenter: finalCenter,
-                                    toolbarSize: toolbarMeasuredSize,
-                                    containerSize: geo.size,
-                                    safeArea: safe,
-                                    topBottomMargin: toolbarTopBottomMargin,
-                                    sideDockMargin: toolbarSideDockMargin
-                                )
-                                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                                    toolbarDockRaw = next.rawValue
-                                    dragTranslation = .zero
-                                }
-                            }
-                    )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .coordinateSpace(name: "toolbarDockSpace")
             .opacity(chromeHiddenForFocus ? 0 : 1)
             .allowsHitTesting(!chromeHiddenForFocus)
         }
@@ -391,6 +362,7 @@ final class TapeCanvasUIView: UIView {
     private var currentStroke: TapeSessionStroke?
     private var currentStrokeSegmentId: Int?
     private var contentOffset: CGPoint = .zero
+    private var paperMovementLocked = false
     /// Avoid overlapping `saveSession` work (timer + resign active); coalesce to one follow-up save if needed.
     private var sessionSaveInFlight = false
     private var sessionSaveCoalesceRequested = false
@@ -531,6 +503,7 @@ final class TapeCanvasUIView: UIView {
     var toolbarUndoEnabled: Bool { !sessionState.undoStack.isEmpty }
     var toolbarRedoEnabled: Bool { !sessionState.redoPayloadStack.isEmpty }
     var toolbarBaseLineWidth: CGFloat { baseLineWidth }
+    var toolbarPaperMovementLocked: Bool { paperMovementLocked }
 
     /// Exposed for Settings: current brush color.
     var exposedBaseStrokeColor: UIColor { baseStrokeColor }
@@ -623,6 +596,22 @@ final class TapeCanvasUIView: UIView {
 
     func toolbarOpenFullSettings() {
         onOpenFullSettings?()
+    }
+
+    func toolbarSetPaperMovementLocked(_ locked: Bool) {
+        paperMovementLocked = locked
+        if locked {
+            stopDeceleration()
+            stopAutoScroll()
+            lastTouchLocation = nil
+        }
+        postToolbarStateChange()
+        showToast(
+            text: locked
+                ? NSLocalizedString("toast.paper_movement_locked", comment: "Paper movement locked")
+                : NSLocalizedString("toast.paper_movement_unlocked", comment: "Paper movement unlocked"),
+            type: .info
+        )
     }
 
     /// Legacy entry: cycles through `toolbarWidthPresets` and persists (radial width button).
@@ -837,6 +826,13 @@ final class TapeCanvasUIView: UIView {
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        guard !paperMovementLocked else {
+            recognizer.setTranslation(.zero, in: self)
+            if recognizer.state == .began || recognizer.state == .changed {
+                stopDeceleration()
+            }
+            return
+        }
         switch recognizer.state {
         case .began:
             stopDeceleration()
@@ -884,6 +880,7 @@ final class TapeCanvasUIView: UIView {
     }
 
     private func startAutoScrollIfNeeded() {
+        guard !paperMovementLocked else { return }
         guard autoScrollLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(handleAutoScroll))
         link.add(to: .main, forMode: .common)
@@ -896,6 +893,10 @@ final class TapeCanvasUIView: UIView {
     }
 
     @objc private func handleAutoScroll() {
+        guard !paperMovementLocked else {
+            stopAutoScroll()
+            return
+        }
         guard let lastTouchLocation, currentStroke != nil else {
             stopAutoScroll()
             return

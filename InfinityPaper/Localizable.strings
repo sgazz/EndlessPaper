@@ -24,6 +24,7 @@
 "toolbar.redo" = "Redo";
 "toolbar.export" = "Export";
 "toolbar.settings" = "Settings";
+"toolbar.paper_lock" = "Lock paper movement";
 "toolbar.more" = "More";
 "toolbar.more_about" = "About";
 "toolbar.width_a11y_thin" = "Thin stroke";
@@ -48,6 +49,8 @@
 "toolbar.focus_show_tools" = "Show tools";
 "toast.new_space" = "Fresh space.";
 "toast.view_centered" = "Centered on your drawing.";
+"toast.paper_movement_locked" = "Paper movement locked.";
+"toast.paper_movement_unlocked" = "Paper movement unlocked.";
 
 "accessibility.canvas_hint_toolbar" = "Two-finger pan to move the tape. Use the edge toolbar for colors, line width, undo, export, and settings. Drag the toolbar toward another edge to dock it; along the left or right edge it turns vertical.";
 "accessibility.canvas_hint_radial" = "Two-finger pan to move the tape. Double-tap the Infinity button to open the radial menu for tools.";

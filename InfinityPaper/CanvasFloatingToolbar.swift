@@ -20,6 +20,7 @@ final class CanvasToolbarStateBroker: ObservableObject {
     @Published var lineWidthLabel: String = ""
     @Published var selectedColorIndex: Int = 0
     @Published var selectedWidthPresetIndex: Int = 0
+    @Published var paperMovementLocked: Bool = false
     /// Matches actual stroke (e.g. white in dark mode for first slot), unlike raw palette swatches.
     @Published var strokePreviewUIColor: UIColor = .darkGray
 
@@ -43,6 +44,7 @@ final class CanvasToolbarStateBroker: ObservableObject {
             lineWidthLabel = ""
             selectedColorIndex = 0
             selectedWidthPresetIndex = 0
+            paperMovementLocked = false
             strokePreviewUIColor = .darkGray
             return
         }
@@ -51,6 +53,7 @@ final class CanvasToolbarStateBroker: ObservableObject {
         lineWidthLabel = String(format: "%.1f", canvas.toolbarBaseLineWidth)
         selectedColorIndex = canvas.toolbarSelectedPaletteIndex
         selectedWidthPresetIndex = canvas.toolbarWidthPresetIndex()
+        paperMovementLocked = canvas.toolbarPaperMovementLocked
         strokePreviewUIColor = canvas.exposedBaseStrokeColor
     }
 
@@ -207,6 +210,7 @@ private struct InfinityToolbarPopover: View {
     let onNewSpace: () -> Void
     let onCenterView: () -> Void
     let onFocusMode: () -> Void
+    let onAbout: () -> Void
 
     private var fill: Color {
         Color(uiColor: UIColor { traits in
@@ -226,7 +230,8 @@ private struct InfinityToolbarPopover: View {
         VStack(alignment: .leading, spacing: 0) {
             infinityRow(
                 titleKey: "toolbar.infinity_clear",
-                systemImage: "paintbrush.pointed.fill",
+                systemImage: nil,
+                imageAssetName: "InfinityPaper",
                 isDestructive: true,
                 action: onClearCanvas
             )
@@ -251,6 +256,13 @@ private struct InfinityToolbarPopover: View {
                 isDestructive: false,
                 action: onFocusMode
             )
+            divider
+            infinityRow(
+                titleKey: "toolbar.more_about",
+                systemImage: "info.circle",
+                isDestructive: false,
+                action: onAbout
+            )
         }
         .frame(minWidth: isPad ? 220 : 196)
         .padding(.vertical, isPad ? 6 : 4)
@@ -271,12 +283,26 @@ private struct InfinityToolbarPopover: View {
     }
 
     @ViewBuilder
-    private func infinityRow(titleKey: String, systemImage: String, isDestructive: Bool, action: @escaping () -> Void) -> some View {
+    private func infinityRow(
+        titleKey: String,
+        systemImage: String?,
+        imageAssetName: String? = nil,
+        isDestructive: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         let label = HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: isPad ? 16 : 15, weight: .medium))
-                .foregroundStyle(isDestructive ? Color.red.opacity(0.85) : Color.primary.opacity(0.55))
-                .frame(width: 24, alignment: .center)
+            if let imageAssetName, UIImage(named: imageAssetName) != nil {
+                Image(imageAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: isPad ? 22 : 20, height: isPad ? 22 : 20)
+                    .frame(width: 24, alignment: .center)
+            } else if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: isPad ? 16 : 15, weight: .medium))
+                    .foregroundStyle(isDestructive ? Color.red.opacity(0.85) : Color.primary.opacity(0.55))
+                    .frame(width: 24, alignment: .center)
+            }
             Text(NSLocalizedString(titleKey, comment: ""))
                 .font(.system(size: isPad ? 16 : 15, weight: .medium))
                 .foregroundStyle(isDestructive ? Color.primary : Color.primary.opacity(0.88))
@@ -310,12 +336,12 @@ struct CanvasFloatingToolbar: View {
     var onRedo: () -> Void
     var onExport: () -> Void
     var onSettings: () -> Void
-    var onMoreAbout: () -> Void
-    var onRequestClearCanvas: () -> Void
+    var onTogglePaperLock: () -> Void
     var onInfinityClearCanvas: () -> Void
     var onInfinityNewSpace: () -> Void
     var onInfinityCenterView: () -> Void
     var onInfinityFocusMode: () -> Void
+    var onInfinityAbout: () -> Void
 
     @State private var showColorPicker = false
     @State private var showWidthPicker = false
@@ -357,7 +383,8 @@ struct CanvasFloatingToolbar: View {
         Color(uiColor: broker.strokePreviewUIColor)
     }
 
-    private var popoverArrow: Edge { dock.popoverArrowEdge }
+    /// All toolbar popovers should open downward.
+    private var popoverArrow: Edge { .top }
 
     /// Non-interactive affordance; dragging is handled on the host with a screen-space `DragGesture`.
     private var affordanceGrip: some View {
@@ -508,36 +535,25 @@ struct CanvasFloatingToolbar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(localized: "toolbar.settings")))
 
-        Menu {
-            Button(String(localized: "toolbar.clear_canvas"), role: .destructive, action: onRequestClearCanvas)
-            Button(String(localized: "toolbar.more_about"), action: onMoreAbout)
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.system(size: isPad ? 19 : 17, weight: .medium))
-                .frame(width: iconFrame - 2, height: iconFrame)
+        Button(action: onTogglePaperLock) {
+            Image(systemName: broker.paperMovementLocked ? "hand.raised.slash.fill" : "hand.raised.fill")
+                .font(.system(size: isPad ? 18 : 16, weight: .medium))
+                .frame(width: iconFrame, height: iconFrame)
         }
-        .menuStyle(.button)
-        .tint(iconTint)
-        .accessibilityLabel(Text(String(localized: "toolbar.more")))
-        .padding(.trailing, isVertical ? 0 : 4)
+        .buttonStyle(.plain)
+        .opacity(broker.paperMovementLocked ? 1 : 0.72)
+        .accessibilityLabel(Text(String(localized: "toolbar.paper_lock")))
 
         Button {
             showColorPicker = false
             showWidthPicker = false
             showInfinityMenu = true
         } label: {
-            Text("∞")
-                .font(.system(size: isPad ? 22 : 20, weight: .semibold, design: .rounded))
-                .foregroundStyle(Self.infinityBrand)
+            Image("InfinityPaper")
+                .resizable()
+                .scaledToFit()
+                .frame(width: isPad ? 54 : 46, height: isPad ? 54 : 46)
                 .frame(width: iconFrame, height: iconFrame)
-                .background(
-                    Circle()
-                        .fill(Self.infinityBrand.opacity(colorScheme == .dark ? 0.22 : 0.14))
-                )
-                .overlay(
-                    Circle()
-                        .stroke(Self.infinityBrand.opacity(0.28), lineWidth: 0.5)
-                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(localized: "toolbar.infinity_a11y")))
@@ -562,6 +578,10 @@ struct CanvasFloatingToolbar: View {
                 onFocusMode: {
                     showInfinityMenu = false
                     onInfinityFocusMode()
+                },
+                onAbout: {
+                    showInfinityMenu = false
+                    onInfinityAbout()
                 }
             )
             .presentationCompactAdaptation(.popover)

@@ -142,7 +142,13 @@ final class CanvasExportManager {
             ? CGFloat(defaults.double(forKey: ExportKeys.margin))
             : 0
         
-        let pageBounds = bounds
+        let pageBounds = CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: bounds.width + 2 * margin,
+                height: bounds.height + 2 * margin
+            )
+        )
         let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
         let data = renderer.pdfData { context in
             context.beginPage()
@@ -339,7 +345,8 @@ final class CanvasExportManager {
     private func exportFileName(extension ext: String) -> String {
         let defaults = UserDefaults.standard
         let autoName = defaults.object(forKey: ExportKeys.autoName) != nil
-            && defaults.bool(forKey: ExportKeys.autoName)
+            ? defaults.bool(forKey: ExportKeys.autoName)
+            : true
         let prefix = Self.sanitizedExportPrefix(defaults.string(forKey: ExportKeys.prefix))
         
         if autoName {
