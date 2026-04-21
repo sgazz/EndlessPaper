@@ -111,32 +111,39 @@ private struct ToolbarColorPickerBody: View {
     private var spacing: CGFloat { isPad ? 12 : 10 }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: spacing) {
-                ForEach(Array(colors.enumerated()), id: \.offset) { idx, ui in
-                    Button {
-                        onPick(idx)
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color(uiColor: ui))
-                                .frame(width: swatch, height: swatch)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
-                                )
-                            if idx == selectedIndex {
+        ZStack(alignment: .trailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: spacing) {
+                    ForEach(Array(colors.enumerated()), id: \.offset) { idx, ui in
+                        Button {
+                            onPick(idx)
+                        } label: {
+                            ZStack {
                                 Circle()
-                                    .stroke(Color.primary.opacity(0.55), lineWidth: 2)
-                                    .frame(width: swatch + 6, height: swatch + 6)
+                                    .fill(Color(uiColor: ui))
+                                    .frame(width: swatch, height: swatch)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
+                                    )
+                                if idx == selectedIndex {
+                                    Circle()
+                                        .stroke(Color.primary.opacity(0.55), lineWidth: 2)
+                                        .frame(width: swatch + 6, height: swatch + 6)
+                                }
                             }
+                            .frame(width: swatch + 10, height: swatch + 10)
                         }
-                        .frame(width: swatch + 10, height: swatch + 10)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text(String(format: NSLocalizedString("toolbar.color_slot", comment: ""), idx + 1)))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text(String(format: NSLocalizedString("toolbar.color_slot", comment: ""), idx + 1)))
                 }
             }
+            Image(systemName: "chevron.right.circle.fill")
+                .font(.system(size: isPad ? 17 : 15, weight: .semibold))
+                .foregroundStyle(Color.primary.opacity(0.45))
+                .padding(.trailing, 2)
+                .allowsHitTesting(false)
         }
         .frame(maxWidth: isPad ? 360 : 260)
     }
@@ -211,6 +218,10 @@ private struct InfinityToolbarPopover: View {
     let onCenterView: () -> Void
     let onFocusMode: () -> Void
     let onAbout: () -> Void
+    let onZoomIn: () -> Void
+    let onZoomOut: () -> Void
+    let onResetView: () -> Void
+    let onFitContent: () -> Void
 
     private var fill: Color {
         Color(uiColor: UIColor { traits in
@@ -248,6 +259,34 @@ private struct InfinityToolbarPopover: View {
                 systemImage: "scope",
                 isDestructive: false,
                 action: onCenterView
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_zoom_in",
+                systemImage: "plus.magnifyingglass",
+                isDestructive: false,
+                action: onZoomIn
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_zoom_out",
+                systemImage: "minus.magnifyingglass",
+                isDestructive: false,
+                action: onZoomOut
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_reset_view",
+                systemImage: "arrow.counterclockwise",
+                isDestructive: false,
+                action: onResetView
+            )
+            divider
+            infinityRow(
+                titleKey: "toolbar.infinity_fit_content",
+                systemImage: "arrow.up.left.and.down.right.magnifyingglass",
+                isDestructive: false,
+                action: onFitContent
             )
             divider
             infinityRow(
@@ -342,6 +381,10 @@ struct CanvasFloatingToolbar: View {
     var onInfinityCenterView: () -> Void
     var onInfinityFocusMode: () -> Void
     var onInfinityAbout: () -> Void
+    var onInfinityZoomIn: () -> Void
+    var onInfinityZoomOut: () -> Void
+    var onInfinityResetView: () -> Void
+    var onInfinityFitContent: () -> Void
 
     @State private var showColorPicker = false
     @State private var showWidthPicker = false
@@ -386,32 +429,14 @@ struct CanvasFloatingToolbar: View {
     /// All toolbar popovers should open downward.
     private var popoverArrow: Edge { .top }
 
-    /// Non-interactive affordance; dragging is handled on the host with a screen-space `DragGesture`.
-    private var affordanceGrip: some View {
-        Group {
-            if isVertical {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(iconTint.opacity(0.22))
-                    .frame(width: isPad ? 22 : 18, height: isPad ? 5 : 4)
-            } else {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(iconTint.opacity(0.22))
-                    .frame(width: isPad ? 5 : 4, height: isPad ? 22 : 18)
-            }
-        }
-        .accessibilityHidden(true)
-    }
-
     var body: some View {
         Group {
             if isVertical {
                 VStack(spacing: verticalItemSpacing) {
-                    affordanceGrip
                     controlButtons
                 }
             } else {
                 HStack(spacing: interItemSpacing) {
-                    affordanceGrip
                     controlButtons
                 }
             }
@@ -430,7 +455,6 @@ struct CanvasFloatingToolbar: View {
         )
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), radius: isPad ? 14 : 10, y: isPad ? 5 : 4)
         .accessibilityElement(children: .contain)
-        .accessibilityHint(Text(String(localized: "toolbar.drag_a11y_hint")))
     }
 
     @ViewBuilder
@@ -582,6 +606,22 @@ struct CanvasFloatingToolbar: View {
                 onAbout: {
                     showInfinityMenu = false
                     onInfinityAbout()
+                },
+                onZoomIn: {
+                    showInfinityMenu = false
+                    onInfinityZoomIn()
+                },
+                onZoomOut: {
+                    showInfinityMenu = false
+                    onInfinityZoomOut()
+                },
+                onResetView: {
+                    showInfinityMenu = false
+                    onInfinityResetView()
+                },
+                onFitContent: {
+                    showInfinityMenu = false
+                    onInfinityFitContent()
                 }
             )
             .presentationCompactAdaptation(.popover)

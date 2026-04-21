@@ -7,8 +7,7 @@
 "splash.whisper" = "Think, scribble, let the tape roll.";
 
 "first_use.lead" = "Draw with one finger.";
-"first_use.body" = "Slide the paper with two. Tools live in the bar along the edge (drag the grip to move it) — or turn on the ∞ trigger in Settings for the classic radial menu.";
-"first_use.dismiss" = "OK";
+"first_use.body" = "Use two fingers to move the paper or pinch to zoom. Double-tap with two fingers to reset the view. Tools live in the top bar.";
 
 "about.purpose" = "Not for lists or neat notes. A place to unload your head, doodle, and follow a line as far as it goes.";
 "about.sub" = "No pages to name. No pressure to finish.";
@@ -42,6 +41,10 @@
 "toolbar.infinity_clear" = "Clear canvas…";
 "toolbar.infinity_new_space" = "New space…";
 "toolbar.infinity_center" = "Center view";
+"toolbar.infinity_zoom_in" = "Zoom in";
+"toolbar.infinity_zoom_out" = "Zoom out";
+"toolbar.infinity_reset_view" = "Reset view";
+"toolbar.infinity_fit_content" = "Fit content";
 "toolbar.infinity_focus" = "Focus mode";
 "toolbar.new_space_confirm_title" = "Start a new space?";
 "toolbar.new_space_confirm_message" = "This clears the canvas and resets scroll to the beginning. You can’t undo this.";
@@ -49,6 +52,7 @@
 "toolbar.focus_show_tools" = "Show tools";
 "toast.new_space" = "Fresh space.";
 "toast.view_centered" = "Centered on your drawing.";
+"toast.view_fit_content" = "Fit to content.";
 "toast.paper_movement_locked" = "Paper movement locked.";
 "toast.paper_movement_unlocked" = "Paper movement unlocked.";
 

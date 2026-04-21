@@ -30,7 +30,6 @@ private struct TapeCanvasView: View {
     @State private var showAbout = false
     @State private var showSettings = false
     @AppStorage("firstUseOrientationDismissed") private var firstUseOrientationDismissed = false
-    @State private var orientationHintOpacity: Double = 1
 
     @State private var toolbarMeasuredSize: CGSize = ToolbarSizePreferenceKey.defaultValue
     @State private var showClearCanvasConfirmation = false
@@ -68,17 +67,6 @@ private struct TapeCanvasView: View {
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                                 .multilineTextAlignment(.center)
-                            Button(NSLocalizedString("first_use.dismiss", comment: "Dismiss first-use hint")) {
-                                withAnimation(.easeOut(duration: 0.35)) {
-                                    orientationHintOpacity = 0
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
-                                    firstUseOrientationDismissed = true
-                                }
-                            }
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 2)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 28)
@@ -86,9 +74,14 @@ private struct TapeCanvasView: View {
                         .padding(.bottom, pad.bottom + 8)
                         .padding(.leading, pad.leading)
                         .padding(.trailing, pad.trailing)
-                        .opacity(chromeHiddenForFocus ? 0 : orientationHintOpacity)
+                        .opacity(chromeHiddenForFocus ? 0 : 1)
                         .allowsHitTesting(!chromeHiddenForFocus)
                         .transition(.opacity)
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                firstUseOrientationDismissed = true
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -167,6 +160,30 @@ private struct TapeCanvasView: View {
                         },
                         onInfinityAbout: {
                             showAbout = true
+                        },
+                        onInfinityZoomIn: {
+                            DispatchQueue.main.async {
+                                toolbarBroker.canvas?.toolbarZoomIn()
+                                toolbarBroker.syncFromCanvas()
+                            }
+                        },
+                        onInfinityZoomOut: {
+                            DispatchQueue.main.async {
+                                toolbarBroker.canvas?.toolbarZoomOut()
+                                toolbarBroker.syncFromCanvas()
+                            }
+                        },
+                        onInfinityResetView: {
+                            DispatchQueue.main.async {
+                                toolbarBroker.canvas?.toolbarResetView()
+                                toolbarBroker.syncFromCanvas()
+                            }
+                        },
+                        onInfinityFitContent: {
+                            DispatchQueue.main.async {
+                                toolbarBroker.canvas?.toolbarFitContent()
+                                toolbarBroker.syncFromCanvas()
+                            }
                         }
                     )
                     .background(
@@ -362,6 +379,9 @@ final class TapeCanvasUIView: UIView {
     private var currentStroke: TapeSessionStroke?
     private var currentStrokeSegmentId: Int?
     private var contentOffset: CGPoint = .zero
+    private var zoomScale: CGFloat = 1
+    private let minZoomScale: CGFloat = 0.5
+    private let maxZoomScale: CGFloat = 2.5
     private var paperMovementLocked = false
     /// Avoid overlapping `saveSession` work (timer + resign active); coalesce to one follow-up save if needed.
     private var sessionSaveInFlight = false
@@ -373,9 +393,9 @@ final class TapeCanvasUIView: UIView {
     private var autoScrollLink: CADisplayLink?
     private var lastTouchLocation: CGPoint?
     private let autoScrollSpeed: CGFloat = 90
-    private var decelVelocity: CGFloat = 0
+    private var decelVelocity: CGPoint = .zero
     private let decelRate: CGFloat = 0.92
-    private let velocityStopThreshold: CGFloat = 4
+    private let velocityStopThreshold: CGFloat = 12
     /// Adaptive background color that responds to system dark mode.
     private var backgroundColorTone: UIColor {
         UIColor { traitCollection in
@@ -477,6 +497,16 @@ final class TapeCanvasUIView: UIView {
         recognizer.maximumNumberOfTouches = 2
         return recognizer
     }()
+    private lazy var pinchRecognizer: UIPinchGestureRecognizer = {
+        UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+    }()
+    private lazy var twoFingerDoubleTapRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerDoubleTap(_:)))
+        recognizer.numberOfTouchesRequired = 2
+        recognizer.numberOfTapsRequired = 2
+        recognizer.cancelsTouchesInView = false
+        return recognizer
+    }()
     private lazy var tapRecognizer: UITapGestureRecognizer = {
         let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         recognizer.cancelsTouchesInView = false
@@ -496,8 +526,7 @@ final class TapeCanvasUIView: UIView {
     private static let legacyRadialDefaultsKey = "settings.ui.legacyRadialMenuTrigger"
 
     static func readLegacyRadialMenuTriggerEnabled() -> Bool {
-        UserDefaults.standard.object(forKey: legacyRadialDefaultsKey) != nil
-            && UserDefaults.standard.bool(forKey: legacyRadialDefaultsKey)
+        false
     }
 
     var toolbarUndoEnabled: Bool { !sessionState.undoStack.isEmpty }
@@ -541,15 +570,34 @@ final class TapeCanvasUIView: UIView {
     /// Scrolls so the current drawing (if any) is roughly centered in the viewport.
     func toolbarCenterViewOnContent() {
         guard bounds.width > 1 else { return }
+        let visibleWorldWidth = bounds.width / max(zoomScale, 0.001)
+        let visibleWorldHeight = bounds.height / max(zoomScale, 0.001)
         if let rect = sessionState.rawWorldBoundingRect(currentStroke: currentStroke) {
-            let midX = rect.midX
-            contentOffset.x = midX - bounds.width * 0.5
+            contentOffset.x = rect.midX - visibleWorldWidth * 0.5
+            contentOffset.y = rect.midY - visibleWorldHeight * 0.5
         } else {
             contentOffset = .zero
         }
+        clampContentOffset()
         setNeedsDisplay()
         postToolbarStateChange()
         showToast(text: NSLocalizedString("toast.view_centered", comment: "View centered"), type: .info)
+    }
+
+    func toolbarZoomIn() {
+        zoomBy(step: 1.2)
+    }
+
+    func toolbarZoomOut() {
+        zoomBy(step: 1 / 1.2)
+    }
+
+    func toolbarResetView() {
+        resetZoomAndCenter(animated: true)
+    }
+
+    func toolbarFitContent() {
+        fitContentInView(animated: true)
     }
     /// Called from Settings: load the last saved session.
     func loadSessionFromSettings() {
@@ -571,10 +619,9 @@ final class TapeCanvasUIView: UIView {
     }
 
     private func applyLegacyRadialMenuVisibility() {
-        let show = Self.readLegacyRadialMenuTriggerEnabled()
-        menuTriggerButton.isHidden = !show
-        menuTriggerButton.isUserInteractionEnabled = show
-        menuTriggerPan.isEnabled = show
+        menuTriggerButton.isHidden = true
+        menuTriggerButton.isUserInteractionEnabled = false
+        menuTriggerPan.isEnabled = false
     }
 
     /// Call after toggling the legacy radial trigger in Settings so the ∞ button appears or hides immediately.
@@ -663,6 +710,7 @@ final class TapeCanvasUIView: UIView {
             firstColorMenuTint: isDark ? .white : nil
         )
         setNeedsDisplay()
+        postToolbarStateChange()
     }
 
     override init(frame: CGRect) {
@@ -698,25 +746,22 @@ final class TapeCanvasUIView: UIView {
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
-        let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: bounds.width, segmentWidth: segmentWidth)
+        let viewportWorldWidth = bounds.width / max(zoomScale, 0.001)
+        let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: viewportWorldWidth, segmentWidth: segmentWidth)
+        context.saveGState()
+        context.scaleBy(x: zoomScale, y: zoomScale)
+        context.translateBy(x: -contentOffset.x, y: -contentOffset.y)
         for id in visibleIds {
             guard let segment = sessionState.segments[id] else { continue }
             for stroke in segment.strokes {
-                CanvasRenderer.drawStroke(
-                    toRenderStroke(stroke),
-                    in: context,
-                    contentOffset: contentOffset
-                )
+                CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
             }
         }
 
         if let stroke = currentStroke {
-            CanvasRenderer.drawStroke(
-                toRenderStroke(stroke),
-                in: context,
-                contentOffset: contentOffset
-            )
+            CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
         }
+        context.restoreGState()
         
         needsRedraw = false
     }
@@ -742,7 +787,10 @@ final class TapeCanvasUIView: UIView {
     }
 
     private func toWorldPoint(_ viewPoint: CGPoint) -> CGPoint {
-        CGPoint(x: viewPoint.x + contentOffset.x, y: viewPoint.y + contentOffset.y)
+        CGPoint(
+            x: viewPoint.x / max(zoomScale, 0.001) + contentOffset.x,
+            y: viewPoint.y / max(zoomScale, 0.001) + contentOffset.y
+        )
     }
 
     /// Appends touch samples using `coalescedTouches` when available so fast strokes stay curved between display frames.
@@ -774,7 +822,8 @@ final class TapeCanvasUIView: UIView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
+        guard (panRecognizer.state == .possible || panRecognizer.state == .failed),
+              (pinchRecognizer.state == .possible || pinchRecognizer.state == .failed) else { return }
         if radialMenu.isMenuVisible { return }
         guard let touch = touches.first, touches.count == 1 else { return }
         stopDeceleration()
@@ -793,7 +842,8 @@ final class TapeCanvasUIView: UIView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard panRecognizer.state == .possible || panRecognizer.state == .failed else { return }
+        guard (panRecognizer.state == .possible || panRecognizer.state == .failed),
+              (pinchRecognizer.state == .possible || pinchRecognizer.state == .failed) else { return }
         guard let touch = touches.first, touches.count == 1 else { return }
         let location = touch.location(in: self)
         lastTouchLocation = location
@@ -838,18 +888,44 @@ final class TapeCanvasUIView: UIView {
             stopDeceleration()
         case .changed:
             let translation = recognizer.translation(in: self)
-            contentOffset.x -= translation.x
-            telemetry.recordPan(deltaX: translation.x)
+            contentOffset.x -= translation.x / max(zoomScale, 0.001)
+            contentOffset.y -= translation.y / max(zoomScale, 0.001)
+            telemetry.recordPan(deltaX: hypot(translation.x, translation.y))
             recognizer.setTranslation(.zero, in: self)
             updateSegmentsIfNeeded()
             setNeedsDisplay()
         case .ended, .cancelled:
             let velocity = recognizer.velocity(in: self)
-            decelVelocity = velocity.x
+            decelVelocity = CGPoint(
+                x: velocity.x / max(zoomScale, 0.001),
+                y: velocity.y / max(zoomScale, 0.001)
+            )
             startDeceleration()
         default:
             break
         }
+    }
+
+    @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+        guard !paperMovementLocked else { return }
+        let oldScale = zoomScale
+        let newScale = min(max(minZoomScale, oldScale * recognizer.scale), maxZoomScale)
+        guard abs(newScale - oldScale) > 0.0001 else {
+            recognizer.scale = 1
+            return
+        }
+        let focal = recognizer.location(in: self)
+        let worldFocalBefore = CGPoint(
+            x: focal.x / max(oldScale, 0.001) + contentOffset.x,
+            y: focal.y / max(oldScale, 0.001) + contentOffset.y
+        )
+        zoomScale = newScale
+        contentOffset.x = worldFocalBefore.x - focal.x / newScale
+        contentOffset.y = worldFocalBefore.y - focal.y / newScale
+        clampContentOffset()
+        updateSegmentsIfNeeded()
+        setNeedsDisplay()
+        recognizer.scale = 1
     }
 
     private func startDeceleration() {
@@ -862,19 +938,22 @@ final class TapeCanvasUIView: UIView {
     private func stopDeceleration() {
         displayLink?.invalidate()
         displayLink = nil
-        decelVelocity = 0
+        decelVelocity = .zero
     }
 
     @objc private func handleDeceleration() {
         guard displayLink != nil else { return }
         let dt = CGFloat(displayLink?.duration ?? 1.0 / 60.0)
-        if abs(decelVelocity) < velocityStopThreshold {
+        if hypot(decelVelocity.x, decelVelocity.y) < velocityStopThreshold {
             stopDeceleration()
             return
         }
-        contentOffset.x -= decelVelocity * dt
-        telemetry.recordPan(deltaX: decelVelocity * dt)
-        decelVelocity *= pow(decelRate, dt * 60)
+        contentOffset.x -= decelVelocity.x * dt
+        contentOffset.y -= decelVelocity.y * dt
+        telemetry.recordPan(deltaX: hypot(decelVelocity.x * dt, decelVelocity.y * dt))
+        let decay = pow(decelRate, dt * 60)
+        decelVelocity.x *= decay
+        decelVelocity.y *= decay
         updateSegmentsIfNeeded()
         setNeedsDisplay()
     }
@@ -902,7 +981,7 @@ final class TapeCanvasUIView: UIView {
             return
         }
         let dt = CGFloat(autoScrollLink?.duration ?? 1.0 / 60.0)
-        contentOffset.x += autoScrollSpeed * dt
+        contentOffset.x += (autoScrollSpeed * dt) / max(zoomScale, 0.001)
         let worldPoint = toWorldPoint(lastTouchLocation)
         guard var stroke = currentStroke else {
             stopAutoScroll()
@@ -1030,7 +1109,8 @@ final class TapeCanvasUIView: UIView {
     private func drawStrokesForExport(in context: CGContext) {
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: bounds.width, segmentWidth: segmentWidth)
+        let viewportWorldWidth = bounds.width / max(zoomScale, 0.001)
+        let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: viewportWorldWidth, segmentWidth: segmentWidth)
         for id in visibleIds {
             guard let segment = sessionState.segments[id] else { continue }
             for stroke in segment.strokes {
@@ -1043,7 +1123,8 @@ final class TapeCanvasUIView: UIView {
     }
 
     private func updateSegmentsIfNeeded() {
-        sessionState.updateSegmentsIfNeeded(contentOffset: contentOffset, boundsWidth: bounds.width, segmentWidth: segmentWidth)
+        let viewportWorldWidth = bounds.width / max(zoomScale, 0.001)
+        sessionState.updateSegmentsIfNeeded(contentOffset: contentOffset, boundsWidth: viewportWorldWidth, segmentWidth: segmentWidth)
     }
 
     func showMenuAtCenter() {
@@ -1204,7 +1285,10 @@ final class TapeCanvasUIView: UIView {
     private func configureCommon() {
         isMultipleTouchEnabled = true
         addGestureRecognizer(panRecognizer)
+        addGestureRecognizer(pinchRecognizer)
         addGestureRecognizer(tapRecognizer)
+        addGestureRecognizer(twoFingerDoubleTapRecognizer)
+        tapRecognizer.require(toFail: twoFingerDoubleTapRecognizer)
         configureMenuTriggerButton()
         _ = radialMenu
         radialMenu.syncPaletteIndex()
@@ -1222,6 +1306,79 @@ final class TapeCanvasUIView: UIView {
             self?.handleUserInterfaceStyleChange(previous: previousTraitCollection)
         }
         applyLegacyRadialMenuVisibility()
+    }
+
+    @objc private func handleTwoFingerDoubleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        resetZoomAndCenter(animated: true)
+    }
+
+    private func resetZoomAndCenter(animated: Bool) {
+        let apply = {
+            self.zoomScale = 1
+            self.toolbarCenterViewOnContent()
+        }
+        if animated {
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                apply()
+            }
+        } else {
+            apply()
+        }
+    }
+
+    private func fitContentInView(animated: Bool) {
+        guard let rect = sessionState.rawWorldBoundingRect(currentStroke: currentStroke),
+              rect.width > 1, rect.height > 1, bounds.width > 1, bounds.height > 1 else {
+            resetZoomAndCenter(animated: animated)
+            return
+        }
+        let pad: CGFloat = 24
+        let targetX = (bounds.width - 2 * pad) / rect.width
+        let targetY = (bounds.height - 2 * pad) / rect.height
+        let targetScale = min(max(minZoomScale, min(targetX, targetY)), maxZoomScale)
+        let apply = {
+            self.zoomScale = targetScale
+            let visibleW = self.bounds.width / max(self.zoomScale, 0.001)
+            let visibleH = self.bounds.height / max(self.zoomScale, 0.001)
+            self.contentOffset.x = rect.midX - visibleW * 0.5
+            self.contentOffset.y = rect.midY - visibleH * 0.5
+            self.clampContentOffset()
+            self.updateSegmentsIfNeeded()
+            self.setNeedsDisplay()
+            self.postToolbarStateChange()
+            self.showToast(text: NSLocalizedString("toast.view_fit_content", comment: "Fit content"), type: .info)
+        }
+        if animated {
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                apply()
+            }
+        } else {
+            apply()
+        }
+    }
+
+    private func zoomBy(step: CGFloat) {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let oldScale = zoomScale
+        let newScale = min(max(minZoomScale, oldScale * step), maxZoomScale)
+        guard abs(newScale - oldScale) > 0.0001 else { return }
+        let worldAtCenter = CGPoint(
+            x: center.x / max(oldScale, 0.001) + contentOffset.x,
+            y: center.y / max(oldScale, 0.001) + contentOffset.y
+        )
+        zoomScale = newScale
+        contentOffset.x = worldAtCenter.x - center.x / newScale
+        contentOffset.y = worldAtCenter.y - center.y / newScale
+        clampContentOffset()
+        updateSegmentsIfNeeded()
+        setNeedsDisplay()
+        postToolbarStateChange()
+    }
+
+    private func clampContentOffset() {
+        contentOffset.x = max(-bounds.width, min(contentOffset.x, 1_000_000))
+        contentOffset.y = max(-bounds.height, min(contentOffset.y, 1_000_000))
     }
 
     /// Applies brush color and line width from UserDefaults (set in Settings) so they persist across launches.

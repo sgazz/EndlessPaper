@@ -113,14 +113,6 @@ struct SettingsView: View {
                     exportSection
                 }
 
-                Section(header: Text("Toolbar"), footer: Text("The bottom bar is the default for tools. Enable the ∞ trigger only if you want the classic radial layout (e.g. for comparison).")) {
-                    Toggle("Show ∞ radial menu trigger", isOn: $legacyRadialMenuTrigger)
-                        .onChange(of: legacyRadialMenuTrigger) { _, newValue in
-                            UserDefaults.standard.set(newValue, forKey: Keys.legacyRadialMenuTrigger)
-                            onLegacyRadialTriggerChanged()
-                        }
-                }
-
                 Section(header: Text("Session & Storage"), footer: Text("Session is one drawing; it is saved automatically. Clear removes it and the saved file (you’ll be asked to confirm).")) {
                     autosaveSection
                     Button {
