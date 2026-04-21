@@ -386,6 +386,7 @@ final class TapeCanvasUIView: UIView {
     /// Avoid overlapping `saveSession` work (timer + resign active); coalesce to one follow-up save if needed.
     private var sessionSaveInFlight = false
     private var sessionSaveCoalesceRequested = false
+    private var paperSurfaceObserverToken: NSObjectProtocol?
 #if DEBUG
     private static let saveDiagnostics = Logger(subsystem: "com.infinitypaper", category: "TapeCanvas")
 #endif
@@ -396,16 +397,11 @@ final class TapeCanvasUIView: UIView {
     private var decelVelocity: CGPoint = .zero
     private let decelRate: CGFloat = 0.92
     private let velocityStopThreshold: CGFloat = 12
+    private var cachedPaperSurface: PaperSurface = .quiet
     /// Adaptive background color that responds to system dark mode.
     private var backgroundColorTone: UIColor {
-        UIColor { traitCollection in
-            if traitCollection.userInterfaceStyle == .dark {
-                // Dark mode: dark gray background
-                UIColor(red: 28.0 / 255.0, green: 28.0 / 255.0, blue: 30.0 / 255.0, alpha: 1.0)
-            } else {
-                // Light mode: light beige background
-                UIColor(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 248.0 / 255.0, alpha: 1.0)
-            }
+        UIColor { traits in
+            PaperSurface.current().backgroundColor(for: traits)
         }
     }
     private var baseStrokeColor: UIColor = UIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 0.9)
@@ -725,6 +721,9 @@ final class TapeCanvasUIView: UIView {
 
     deinit {
         sessionManager.stopPeriodicSaveTimer()
+        if let token = paperSurfaceObserverToken {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
     override func draw(_ rect: CGRect) {
@@ -741,6 +740,7 @@ final class TapeCanvasUIView: UIView {
             rect: rect,
             noiseTile: noiseTile,
             backgroundColor: backgroundColorTone,
+            noiseProfile: PaperSurface.current().noiseProfile,
             traitCollection: traitCollection
         )
         context.setLineCap(.round)
@@ -1074,8 +1074,15 @@ final class TapeCanvasUIView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         applyLegacyRadialMenuVisibility()
-        // Update background color to adapt to dark mode
+        // Update background color to adapt to dark mode / paper surface.
         backgroundColor = backgroundColorTone.resolvedColor(with: traitCollection)
+
+        let surfaceNow = PaperSurface.current()
+        if surfaceNow != cachedPaperSurface {
+            cachedPaperSurface = surfaceNow
+            noiseTile = nil
+            setNeedsDisplay()
+        }
         
         segmentWidth = max(1, bounds.width * 1.5)
         updateSegmentsIfNeeded()
@@ -1207,6 +1214,7 @@ final class TapeCanvasUIView: UIView {
                         rect: rect,
                         noiseTile: self.noiseTile,
                         backgroundColor: self.backgroundColorTone,
+                        noiseProfile: PaperSurface.current().noiseProfile,
                         traitCollection: self.traitCollection
                     )
                 },
@@ -1304,6 +1312,19 @@ final class TapeCanvasUIView: UIView {
         }
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: TapeCanvasUIView, previousTraitCollection: UITraitCollection) in
             self?.handleUserInterfaceStyleChange(previous: previousTraitCollection)
+        }
+        if paperSurfaceObserverToken == nil {
+            paperSurfaceObserverToken = NotificationCenter.default.addObserver(
+                forName: PaperSurface.didChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.cachedPaperSurface = PaperSurface.current()
+                self.backgroundColor = self.backgroundColorTone.resolvedColor(with: self.traitCollection)
+                self.noiseTile = nil
+                self.setNeedsDisplay()
+            }
         }
         applyLegacyRadialMenuVisibility()
     }

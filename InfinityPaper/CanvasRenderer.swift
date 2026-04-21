@@ -176,11 +176,13 @@ final class CanvasRenderer {
         rect: CGRect,
         noiseTile: UIImage?,
         backgroundColor: UIColor,
+        noiseProfile: PaperNoiseProfile,
         traitCollection: UITraitCollection
     ) -> UIImage? {
         let tile = noiseTile ?? makeNoiseTile(
             size: Layout.noiseTileSize,
             backgroundColor: backgroundColor,
+            noiseProfile: noiseProfile,
             traitCollection: traitCollection
         )
         UIColor(patternImage: tile).setFill()
@@ -197,6 +199,7 @@ final class CanvasRenderer {
     static func makeNoiseTile(
         size: CGFloat,
         backgroundColor: UIColor,
+        noiseProfile: PaperNoiseProfile,
         traitCollection: UITraitCollection
     ) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
@@ -208,11 +211,10 @@ final class CanvasRenderer {
             ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
 
             // Subtle grain only: low count, alpha ~0.012–0.032 (stays under ~0.04; no visible “texture photo”).
-            let dotCount = 95
-            for _ in 0..<dotCount {
+            for _ in 0..<noiseProfile.dotCount {
                 let x = CGFloat.random(in: 0..<size)
                 let y = CGFloat.random(in: 0..<size)
-                let alpha = CGFloat.random(in: 0.012...0.032)
+                let alpha = CGFloat.random(in: noiseProfile.alphaMin...noiseProfile.alphaMax)
                 let dotColor = isDark
                     ? UIColor(white: 1.0, alpha: alpha)
                     : UIColor(white: 0.0, alpha: alpha)
