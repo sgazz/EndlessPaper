@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var highContrastUI: Bool
     @State private var largerMenuButtons: Bool
     @State private var verboseAccessibilityHints: Bool
+    @State private var legacyRadialMenuTrigger: Bool
 
     let palette: [UIColor]
     let onSelectBaseColor: (UIColor) -> Void
@@ -26,6 +27,7 @@ struct SettingsView: View {
     let onClearSession: () -> Void
     let onLoadPreviousSession: () -> Void
     let onResetRadialMenuPosition: () -> Void
+    let onLegacyRadialTriggerChanged: () -> Void
     let onDismiss: () -> Void
 
     // UserDefaults keys
@@ -47,6 +49,7 @@ struct SettingsView: View {
         static let highContrastUI = "settings.ui.highContrast"
         static let largerMenuButtons = "settings.ui.largerButtons"
         static let verboseAccessibilityHints = "settings.ui.verboseA11y"
+        static let legacyRadialMenuTrigger = "settings.ui.legacyRadialMenuTrigger"
     }
 
     init(
@@ -58,6 +61,7 @@ struct SettingsView: View {
         onClearSession: @escaping () -> Void,
         onLoadPreviousSession: @escaping () -> Void,
         onResetRadialMenuPosition: @escaping () -> Void,
+        onLegacyRadialTriggerChanged: @escaping () -> Void = {},
         onDismiss: @escaping () -> Void
     ) {
         self.palette = palette
@@ -66,6 +70,7 @@ struct SettingsView: View {
         self.onClearSession = onClearSession
         self.onLoadPreviousSession = onLoadPreviousSession
         self.onResetRadialMenuPosition = onResetRadialMenuPosition
+        self.onLegacyRadialTriggerChanged = onLegacyRadialTriggerChanged
         self.onDismiss = onDismiss
 
         // Load defaults
@@ -88,6 +93,7 @@ struct SettingsView: View {
         _highContrastUI = State(initialValue: defaults.object(forKey: Keys.highContrastUI) != nil ? defaults.bool(forKey: Keys.highContrastUI) : false)
         _largerMenuButtons = State(initialValue: defaults.object(forKey: Keys.largerMenuButtons) != nil ? defaults.bool(forKey: Keys.largerMenuButtons) : false)
         _verboseAccessibilityHints = State(initialValue: defaults.object(forKey: Keys.verboseAccessibilityHints) != nil ? defaults.bool(forKey: Keys.verboseAccessibilityHints) : true)
+        _legacyRadialMenuTrigger = State(initialValue: defaults.object(forKey: Keys.legacyRadialMenuTrigger) != nil && defaults.bool(forKey: Keys.legacyRadialMenuTrigger))
 
         // Apply initial color selection if matches current
         if let idx = palette.firstIndex(where: { $0.isEqual(currentBaseColor) }) {
@@ -107,22 +113,12 @@ struct SettingsView: View {
                     exportSection
                 }
 
-                Section(header: Text("Interactions & Gestures")) {
-                    hapticsSection
-                    radialMenuSection
-                }
-
                 Section(header: Text("Session & Storage"), footer: Text("Session is one drawing; it is saved automatically. Clear removes it and the saved file (you’ll be asked to confirm).")) {
                     autosaveSection
-                    Button(role: .destructive) {
-                        onClearSession()
-                    } label: {
-                        Text("Clear current session")
-                    }
                     Button {
                         onLoadPreviousSession()
                     } label: {
-                        Text("Load previous session")
+                        Text("Load last saved session")
                     }
                 }
 
@@ -168,11 +164,11 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            Toggle("Autoload previous session on launch", isOn: $autoloadOnLaunch)
+            Toggle("Autoload last saved session on launch", isOn: $autoloadOnLaunch)
                 .onChange(of: autoloadOnLaunch) { _, newValue in
                     UserDefaults.standard.set(newValue, forKey: Keys.autoloadOnLaunch)
                 }
-            Text("When on, the last saved drawing is loaded at startup.")
+            Text("When on, the last saved drawing is loaded on app launch.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -251,7 +247,7 @@ struct SettingsView: View {
                     UserDefaults.standard.set(Double(newValue), forKey: Keys.exportResolution)
                 }
 
-                Toggle("Include background noise (PNG)", isOn: $includeBackgroundNoise)
+                Toggle("Include background noise (viewport PNG)", isOn: $includeBackgroundNoise)
                     .onChange(of: includeBackgroundNoise) { _, newValue in
                         UserDefaults.standard.set(newValue, forKey: Keys.includeBackgroundNoise)
                     }
@@ -278,7 +274,7 @@ struct SettingsView: View {
     }
 
     private var hapticsSection: some View {
-        Toggle("Haptics in menu", isOn: $hapticsEnabled)
+        Toggle("Haptics in radial menu", isOn: $hapticsEnabled)
             .onChange(of: hapticsEnabled) { _, newValue in
                 UserDefaults.standard.set(newValue, forKey: Keys.hapticsEnabled)
             }
@@ -287,7 +283,7 @@ struct SettingsView: View {
     private var radialMenuSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Menu scale")
+                Text("Radial menu scale")
                 Slider(value: $radialMenuScale, in: 0.8...1.4, step: 0.05)
                 Text(String(format: "%.2f×", radialMenuScale))
             }
@@ -296,7 +292,7 @@ struct SettingsView: View {
             }
 
             HStack {
-                Text("Animation speed")
+                Text("Radial animation speed")
                 Slider(value: $radialAnimationSpeed, in: 0.5...1.5, step: 0.05)
                 Text(String(format: "%.2fx", radialAnimationSpeed))
             }
@@ -304,14 +300,14 @@ struct SettingsView: View {
                 UserDefaults.standard.set(Double(newValue), forKey: Keys.radialAnimationSpeed)
             }
 
-            Button("Reset menu size & animation speed") {
+            Button("Reset radial size & animation speed") {
                 radialMenuScale = 1.0
                 radialAnimationSpeed = 1.0
                 UserDefaults.standard.set(1.0, forKey: Keys.radialMenuScale)
                 UserDefaults.standard.set(1.0, forKey: Keys.radialAnimationSpeed)
             }
 
-            Button("Reset menu position") {
+            Button("Reset radial menu position") {
                 onResetRadialMenuPosition()
             }
         }

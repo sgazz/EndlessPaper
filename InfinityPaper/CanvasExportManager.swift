@@ -22,6 +22,9 @@ final class CanvasExportManager {
         return cleaned
     }
     
+    /// Longest edge in **logical** points after `format.scale`; avoids multi‑hundred‑MB bitmaps on huge sessions.
+    private static let exportFullMaxPixelSide: CGFloat = 8192
+
     private enum ExportKeys {
         static let format = "settings.export.format"
         static let resolution = "settings.export.resolution"
@@ -139,7 +142,13 @@ final class CanvasExportManager {
             ? CGFloat(defaults.double(forKey: ExportKeys.margin))
             : 0
         
-        let pageBounds = bounds
+        let pageBounds = CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: bounds.width + 2 * margin,
+                height: bounds.height + 2 * margin
+            )
+        )
         let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
         let data = renderer.pdfData { context in
             context.beginPage()
@@ -280,7 +289,17 @@ final class CanvasExportManager {
     ) {
         let imageSize = CGSize(width: worldBounds.size.width, height: worldBounds.size.height)
         let format = UIGraphicsImageRendererFormat()
-        format.scale = resolution
+        let longLogical = max(imageSize.width, imageSize.height)
+        let effectiveScale: CGFloat
+        if longLogical > 0, longLogical * resolution > Self.exportFullMaxPixelSide {
+            effectiveScale = max(1, (Self.exportFullMaxPixelSide / longLogical).rounded(.down))
+            if effectiveScale + 0.001 < resolution {
+                logger.debug("Full PNG export: scale reduced \(resolution) → \(effectiveScale) to cap bitmap size")
+            }
+        } else {
+            effectiveScale = resolution
+        }
+        format.scale = effectiveScale
         let renderer = UIGraphicsImageRenderer(size: imageSize, format: format)
         
         let image = renderer.image { _ in
@@ -326,7 +345,8 @@ final class CanvasExportManager {
     private func exportFileName(extension ext: String) -> String {
         let defaults = UserDefaults.standard
         let autoName = defaults.object(forKey: ExportKeys.autoName) != nil
-            && defaults.bool(forKey: ExportKeys.autoName)
+            ? defaults.bool(forKey: ExportKeys.autoName)
+            : true
         let prefix = Self.sanitizedExportPrefix(defaults.string(forKey: ExportKeys.prefix))
         
         if autoName {

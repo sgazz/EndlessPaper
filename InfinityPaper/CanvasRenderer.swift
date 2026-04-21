@@ -18,8 +18,11 @@ struct RenderStroke {
 /// Provides rendering utilities for canvas drawing operations.
 final class CanvasRenderer {
     private enum Layout {
-        static let strokeSmoothingAlpha: CGFloat = 0.18
+        /// Slightly higher than before so line width eases with speed changes instead of ticking.
+        static let strokeSmoothingAlpha: CGFloat = 0.2
         static let noiseTileSize: CGFloat = 96
+        /// Soft pull of stroke ends toward smoothed interior (render only); keeps tips from feeling hooked.
+        static let strokeEndpointBlend: CGFloat = 0.08
     }
     
     /// Draws a stroke in view coordinates (applying content offset transform).
@@ -66,6 +69,9 @@ final class CanvasRenderer {
         in context: CGContext,
         transform: (CGPoint) -> CGPoint
     ) {
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.setMiterLimit(4)
         let smoothed = smoothedPoints(for: stroke.points, passes: 2).map(transform)
         guard smoothed.count > 1 else { return }
         
@@ -118,6 +124,20 @@ final class CanvasRenderer {
             }
             current = next
         }
+        if current.count >= 3 {
+            let w = Layout.strokeEndpointBlend
+            var eased = current
+            eased[0] = CGPoint(
+                x: eased[0].x * (1 - w) + eased[1].x * w,
+                y: eased[0].y * (1 - w) + eased[1].y * w
+            )
+            let li = eased.count - 1
+            eased[li] = CGPoint(
+                x: eased[li].x * (1 - w) + eased[li - 1].x * w,
+                y: eased[li].y * (1 - w) + eased[li - 1].y * w
+            )
+            return eased
+        }
         return current
     }
     
@@ -128,13 +148,15 @@ final class CanvasRenderer {
     /// - Returns: Width scale factor (0.6 to 1.15)
     private static func targetWidthScale(for stroke: RenderStroke, index: Int) -> CGFloat {
         guard stroke.times.count > index else { return 1.0 }
-        let dt = max(0.0001, stroke.times[index] - stroke.times[index - 1])
+        let rawDt = stroke.times[index] - stroke.times[index - 1]
+        // Floor dt so two samples in the same frame do not imply absurd speed (thin spikes).
+        let dt = max(1.0 / 720.0, rawDt)
         let p0 = stroke.points[index - 1]
         let p1 = stroke.points[index]
         let distance = hypot(p1.x - p0.x, p1.y - p0.y)
         let speed = distance / CGFloat(dt)
-        let minSpeed: CGFloat = 30
-        let maxSpeed: CGFloat = 1200
+        let minSpeed: CGFloat = 38
+        let maxSpeed: CGFloat = 1050
         let normalized = min(1, max(0, (speed - minSpeed) / (maxSpeed - minSpeed)))
         let thick = 1.15
         let thin = 0.6
