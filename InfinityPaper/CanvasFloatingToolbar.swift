@@ -241,8 +241,7 @@ private struct InfinityToolbarPopover: View {
         VStack(alignment: .leading, spacing: 0) {
             infinityRow(
                 titleKey: "toolbar.infinity_clear",
-                systemImage: nil,
-                imageAssetName: "InfinityPaper",
+                systemImage: "trash",
                 isDestructive: true,
                 action: onClearCanvas
             )
@@ -551,16 +550,8 @@ struct CanvasFloatingToolbar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(localized: "toolbar.export")))
 
-        Button(action: onSettings) {
-            Image(systemName: "gearshape")
-                .font(.system(size: isPad ? 18 : 16, weight: .medium))
-                .frame(width: iconFrame, height: iconFrame)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(String(localized: "toolbar.settings")))
-
         Button(action: onTogglePaperLock) {
-            Image(systemName: broker.paperMovementLocked ? "hand.raised.slash.fill" : "hand.raised.fill")
+            Image(systemName: broker.paperMovementLocked ? "lock.fill" : "lock.open.fill")
                 .font(.system(size: isPad ? 18 : 16, weight: .medium))
                 .frame(width: iconFrame, height: iconFrame)
         }
@@ -573,10 +564,8 @@ struct CanvasFloatingToolbar: View {
             showWidthPicker = false
             showInfinityMenu = true
         } label: {
-            Image("InfinityPaper")
-                .resizable()
-                .scaledToFit()
-                .frame(width: isPad ? 54 : 46, height: isPad ? 54 : 46)
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: isPad ? 22 : 20, weight: .medium))
                 .frame(width: iconFrame, height: iconFrame)
         }
         .buttonStyle(.plain)
@@ -626,5 +615,13 @@ struct CanvasFloatingToolbar: View {
             )
             .presentationCompactAdaptation(.popover)
         }
+
+        Button(action: onSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: isPad ? 18 : 16, weight: .medium))
+                .frame(width: iconFrame, height: iconFrame)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "toolbar.settings")))
     }
 }

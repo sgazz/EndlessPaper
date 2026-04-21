@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var radialAnimationSpeed: CGFloat
     @State private var autosaveMode: AutosaveMode
     @State private var autoloadOnLaunch: Bool
+    @State private var paperSurface: PaperSurface
     @State private var highContrastUI: Bool
     @State private var largerMenuButtons: Bool
     @State private var verboseAccessibilityHints: Bool
@@ -41,6 +42,7 @@ struct SettingsView: View {
         static let transparentBackground = "settings.export.transparent"
         static let autoNameExports = "settings.export.autoName"
         static let exportPrefix = "settings.export.prefix"
+        static let paperSurface = "settings.paper.surface"
         static let hapticsEnabled = "settings.haptics.enabled"
         static let radialMenuScale = "settings.radial.scale"
         static let radialAnimationSpeed = "settings.radial.animationSpeed"
@@ -85,6 +87,7 @@ struct SettingsView: View {
         _transparentBackground = State(initialValue: defaults.object(forKey: Keys.transparentBackground) != nil ? defaults.bool(forKey: Keys.transparentBackground) : false)
         _autoNameExports = State(initialValue: defaults.object(forKey: Keys.autoNameExports) != nil ? defaults.bool(forKey: Keys.autoNameExports) : true)
         _exportPrefix = State(initialValue: CanvasExportManager.sanitizedExportPrefix(defaults.string(forKey: Keys.exportPrefix)))
+        _paperSurface = State(initialValue: PaperSurface.current(defaults: defaults))
         _hapticsEnabled = State(initialValue: defaults.object(forKey: Keys.hapticsEnabled) != nil ? defaults.bool(forKey: Keys.hapticsEnabled) : true)
         _radialMenuScale = State(initialValue: defaults.object(forKey: Keys.radialMenuScale) != nil ? CGFloat(defaults.double(forKey: Keys.radialMenuScale)) : 1.0)
         _radialAnimationSpeed = State(initialValue: defaults.object(forKey: Keys.radialAnimationSpeed) != nil ? CGFloat(defaults.double(forKey: Keys.radialAnimationSpeed)) : 1.0)
@@ -104,6 +107,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section(header: Text("Paper")) {
+                    Picker("Paper surface", selection: $paperSurface) {
+                        Text("Quiet Paper").tag(PaperSurface.quiet)
+                        Text("Electric Paper").tag(PaperSurface.electric)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: paperSurface) { _, newValue in
+                        PaperSurface.setCurrent(newValue)
+                    }
+                }
+
                 Section(header: Text("Brush & Canvas")) {
                     colorPaletteSection
                     lineWidthSection

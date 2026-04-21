@@ -59,14 +59,10 @@ private struct SplashView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var logoOpacity = 0.0
 
-    /// Slightly richer than canvas (#F8F5EE / #232220) for a soft, premium handoff.
+    /// Matches the paper world tone for a seamless launch handoff.
     private var splashBackground: Color {
         Color(uiColor: UIColor { traits in
-            if traits.userInterfaceStyle == .dark {
-                UIColor(red: 29.0 / 255.0, green: 28.0 / 255.0, blue: 26.0 / 255.0, alpha: 1.0) // #1D1C1A
-            } else {
-                UIColor(red: 243.0 / 255.0, green: 238.0 / 255.0, blue: 228.0 / 255.0, alpha: 1.0) // #F3EEE4
-            }
+            PaperSurface.current().backgroundColor(for: traits)
         })
     }
 
