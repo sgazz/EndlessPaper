@@ -217,7 +217,6 @@ private struct InfinityToolbarPopover: View {
     let onNewSpace: () -> Void
     let onCenterView: () -> Void
     let onFocusMode: () -> Void
-    let onAbout: () -> Void
     let onZoomIn: () -> Void
     let onZoomOut: () -> Void
     let onResetView: () -> Void
@@ -293,13 +292,6 @@ private struct InfinityToolbarPopover: View {
                 systemImage: "moon.stars",
                 isDestructive: false,
                 action: onFocusMode
-            )
-            divider
-            infinityRow(
-                titleKey: "toolbar.more_about",
-                systemImage: "info.circle",
-                isDestructive: false,
-                action: onAbout
             )
         }
         .frame(minWidth: isPad ? 220 : 196)
@@ -379,7 +371,6 @@ struct CanvasFloatingToolbar: View {
     var onInfinityNewSpace: () -> Void
     var onInfinityCenterView: () -> Void
     var onInfinityFocusMode: () -> Void
-    var onInfinityAbout: () -> Void
     var onInfinityZoomIn: () -> Void
     var onInfinityZoomOut: () -> Void
     var onInfinityResetView: () -> Void
@@ -591,10 +582,6 @@ struct CanvasFloatingToolbar: View {
                 onFocusMode: {
                     showInfinityMenu = false
                     onInfinityFocusMode()
-                },
-                onAbout: {
-                    showInfinityMenu = false
-                    onInfinityAbout()
                 },
                 onZoomIn: {
                     showInfinityMenu = false

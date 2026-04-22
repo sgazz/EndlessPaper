@@ -158,9 +158,6 @@ private struct TapeCanvasView: View {
                                 chromeHiddenForFocus = true
                             }
                         },
-                        onInfinityAbout: {
-                            showAbout = true
-                        },
                         onInfinityZoomIn: {
                             DispatchQueue.main.async {
                                 toolbarBroker.canvas?.toolbarZoomIn()
@@ -323,7 +320,7 @@ private struct AboutView: View {
             Text(String(format: NSLocalizedString("app.version_format", comment: "Version format"), appVersion))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-            Text("Hero&Peace© 2026")
+            Text("Hero&Frend© 2026")
                 .font(.caption2)
                 .foregroundStyle(.tertiary.opacity(0.85))
             Spacer()
