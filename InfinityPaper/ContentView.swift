@@ -359,6 +359,11 @@ private struct TapeCanvasRepresentable: UIViewRepresentable {
 }
 
 final class TapeCanvasUIView: UIView {
+    private struct StrokeRenderCacheKey: Hashable {
+        let segmentId: Int
+        let strokeIndex: Int
+    }
+
     private enum Layout {
         static let menuTriggerSize: CGFloat = 88
         static let menuTriggerMargin: CGFloat = 10
@@ -416,8 +421,13 @@ final class TapeCanvasUIView: UIView {
     }
     private var baseLineWidth: CGFloat = Defaults.baseLineWidth
     private var noiseTile: UIImage?
+    private var preparedStrokeCache: [StrokeRenderCacheKey: PreparedRenderStroke] = [:]
     /// Flag to track if redraw is needed (performance optimization).
     private var needsRedraw: Bool = true
+    private var contentRevision: UInt64 = 1
+    private var lastRenderedRevision: UInt64 = 0
+    private var lastRenderedOffset: CGPoint = .zero
+    private var lastRenderedZoomScale: CGFloat = 1
     /// Single curated palette: calm canvas, high-energy strokes (slot 0 → white in dark mode for “paper ink”).
     private let primaryColorPalette: [UIColor] = [
         // Strong neutrals (balance + fine lines on light paper)
@@ -509,6 +519,12 @@ final class TapeCanvasUIView: UIView {
         UIPanGestureRecognizer(target: self, action: #selector(handleMenuTriggerPan(_:)))
     }()
 
+#if DEBUG
+    private static let fpsDiagnostics = Logger(subsystem: "com.infinitypaper", category: "CanvasFPS")
+    private var fpsWindowStart: CFTimeInterval = 0
+    private var fpsFrameCount: Int = 0
+#endif
+
     /// Radial menu “About” / legacy info entry.
     var onRequestSettings: (() -> Void)?
     /// Bottom toolbar gear: full Settings sheet.
@@ -555,7 +571,7 @@ final class TapeCanvasUIView: UIView {
     func toolbarPerformNewSpace() {
         clearLastDrawingSession()
         contentOffset = .zero
-        setNeedsDisplay()
+        requestDisplayIfNeeded()
         postToolbarStateChange()
         showToast(text: NSLocalizedString("toast.new_space", comment: "Fresh space"), type: .info)
     }
@@ -572,7 +588,7 @@ final class TapeCanvasUIView: UIView {
             contentOffset = .zero
         }
         clampContentOffset()
-        setNeedsDisplay()
+        requestDisplayIfNeeded()
         postToolbarStateChange()
         showToast(text: NSLocalizedString("toast.view_centered", comment: "View centered"), type: .info)
     }
@@ -664,7 +680,6 @@ final class TapeCanvasUIView: UIView {
         guard Self.toolbarWidthPresets.indices.contains(index) else { return }
         baseLineWidth = Self.toolbarWidthPresets[index]
         UserDefaults.standard.set(Double(baseLineWidth), forKey: SettingsKeys.baseLineWidth)
-        setNeedsDisplay()
         postToolbarStateChange()
     }
 
@@ -702,7 +717,6 @@ final class TapeCanvasUIView: UIView {
             graphiteColor: graphiteColor.resolvedColor(with: traitCollection),
             firstColorMenuTint: isDark ? .white : nil
         )
-        setNeedsDisplay()
         postToolbarStateChange()
     }
 
@@ -750,8 +764,10 @@ final class TapeCanvasUIView: UIView {
         context.translateBy(x: -contentOffset.x, y: -contentOffset.y)
         for id in visibleIds {
             guard let segment = sessionState.segments[id] else { continue }
-            for stroke in segment.strokes {
-                CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
+            for (index, stroke) in segment.strokes.enumerated() {
+                if let prepared = preparedStroke(for: stroke, segmentId: id, strokeIndex: index) {
+                    CanvasRenderer.drawPreparedStrokeWorld(prepared, in: context)
+                }
             }
         }
 
@@ -761,6 +777,12 @@ final class TapeCanvasUIView: UIView {
         context.restoreGState()
         
         needsRedraw = false
+        lastRenderedOffset = contentOffset
+        lastRenderedZoomScale = zoomScale
+        lastRenderedRevision = contentRevision
+#if DEBUG
+        recordDebugFPSFrame()
+#endif
     }
     
     override func setNeedsDisplay() {
@@ -772,6 +794,57 @@ final class TapeCanvasUIView: UIView {
         needsRedraw = true
         super.setNeedsDisplay(rect)
     }
+
+    private func invalidatePreparedStrokeCache() {
+        preparedStrokeCache.removeAll(keepingCapacity: true)
+    }
+
+    private func invalidatePreparedStrokeCache(for segmentId: Int) {
+        preparedStrokeCache.keys
+            .filter { $0.segmentId == segmentId }
+            .forEach { preparedStrokeCache.removeValue(forKey: $0) }
+    }
+
+    private func markDrawingContentChanged() {
+        contentRevision &+= 1
+    }
+
+    private func requestDisplayIfNeeded(force: Bool = false) {
+        let offsetChanged = abs(contentOffset.x - lastRenderedOffset.x) > 0.0001 ||
+            abs(contentOffset.y - lastRenderedOffset.y) > 0.0001
+        let zoomChanged = abs(zoomScale - lastRenderedZoomScale) > 0.0001
+        let contentChanged = contentRevision != lastRenderedRevision
+        guard force || offsetChanged || zoomChanged || contentChanged else { return }
+        setNeedsDisplay()
+    }
+
+    private func preparedStroke(
+        for stroke: TapeSessionStroke,
+        segmentId: Int,
+        strokeIndex: Int
+    ) -> PreparedRenderStroke? {
+        let key = StrokeRenderCacheKey(segmentId: segmentId, strokeIndex: strokeIndex)
+        if let cached = preparedStrokeCache[key] {
+            return cached
+        }
+        guard let prepared = CanvasRenderer.prepareStroke(toRenderStroke(stroke)) else { return nil }
+        preparedStrokeCache[key] = prepared
+        return prepared
+    }
+
+#if DEBUG
+    private func recordDebugFPSFrame() {
+        let now = CACurrentMediaTime()
+        if fpsWindowStart == 0 { fpsWindowStart = now }
+        fpsFrameCount += 1
+        let elapsed = now - fpsWindowStart
+        guard elapsed >= 1.0 else { return }
+        let fps = Double(fpsFrameCount) / elapsed
+        Self.fpsDiagnostics.debug("canvas fps=\(fps, format: .fixed(precision: 1))")
+        fpsWindowStart = now
+        fpsFrameCount = 0
+    }
+#endif
 
     /// Converts a tape stroke to `RenderStroke` for rendering.
     private func toRenderStroke(_ stroke: TapeSessionStroke) -> RenderStroke {
@@ -835,7 +908,8 @@ final class TapeCanvasUIView: UIView {
         )
         currentStrokeSegmentId = sessionState.segmentId(forWorldX: toWorldPoint(location).x, segmentWidth: segmentWidth)
         startAutoScrollIfNeeded()
-        setNeedsDisplay()
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -845,7 +919,8 @@ final class TapeCanvasUIView: UIView {
         let location = touch.location(in: self)
         lastTouchLocation = location
         appendStrokeSamplesFromTouch(touch, event: event)
-        setNeedsDisplay()
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -860,7 +935,9 @@ final class TapeCanvasUIView: UIView {
         currentStrokeSegmentId = nil
         lastTouchLocation = nil
         stopAutoScroll()
-        setNeedsDisplay()
+        invalidatePreparedStrokeCache(for: segmentId)
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
         postToolbarStateChange()
     }
 
@@ -869,7 +946,8 @@ final class TapeCanvasUIView: UIView {
         currentStrokeSegmentId = nil
         lastTouchLocation = nil
         stopAutoScroll()
-        setNeedsDisplay()
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -890,7 +968,7 @@ final class TapeCanvasUIView: UIView {
             telemetry.recordPan(deltaX: hypot(translation.x, translation.y))
             recognizer.setTranslation(.zero, in: self)
             updateSegmentsIfNeeded()
-            setNeedsDisplay()
+            requestDisplayIfNeeded()
         case .ended, .cancelled:
             let velocity = recognizer.velocity(in: self)
             decelVelocity = CGPoint(
@@ -921,7 +999,7 @@ final class TapeCanvasUIView: UIView {
         contentOffset.y = worldFocalBefore.y - focal.y / newScale
         clampContentOffset()
         updateSegmentsIfNeeded()
-        setNeedsDisplay()
+        requestDisplayIfNeeded()
         recognizer.scale = 1
     }
 
@@ -952,7 +1030,7 @@ final class TapeCanvasUIView: UIView {
         decelVelocity.x *= decay
         decelVelocity.y *= decay
         updateSegmentsIfNeeded()
-        setNeedsDisplay()
+        requestDisplayIfNeeded()
     }
 
     private func startAutoScrollIfNeeded() {
@@ -990,7 +1068,8 @@ final class TapeCanvasUIView: UIView {
         stroke.times.append(stamp)
         currentStroke = stroke
         updateSegmentsIfNeeded()
-        setNeedsDisplay()
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
     }
 
     private func registerForAppLifecycle() {
@@ -1058,7 +1137,9 @@ final class TapeCanvasUIView: UIView {
             case .success(let storedSession):
                 self.sessionState.applyStoredSession(storedSession)
                 self.contentOffset = CGPoint(x: storedSession.contentOffset.x, y: storedSession.contentOffset.y)
-                self.setNeedsDisplay()
+                self.invalidatePreparedStrokeCache()
+                self.markDrawingContentChanged()
+                self.requestDisplayIfNeeded(force: true)
                 self.radialMenu.updateActionAvailability(undoEnabled: !self.sessionState.undoStack.isEmpty, redoEnabled: !self.sessionState.redoPayloadStack.isEmpty)
                 self.postToolbarStateChange()
             case .failure:
@@ -1078,7 +1159,8 @@ final class TapeCanvasUIView: UIView {
         if surfaceNow != cachedPaperSurface {
             cachedPaperSurface = surfaceNow
             noiseTile = nil
-            setNeedsDisplay()
+            markDrawingContentChanged()
+            requestDisplayIfNeeded()
         }
         
         segmentWidth = max(1, bounds.width * 1.5)
@@ -1106,7 +1188,8 @@ final class TapeCanvasUIView: UIView {
                 firstColorMenuTint: isDark ? .white : nil
             )
             applySavedBrushSettings()
-            setNeedsDisplay()
+            markDrawingContentChanged()
+            requestDisplayIfNeeded()
         }
     }
 
@@ -1117,8 +1200,10 @@ final class TapeCanvasUIView: UIView {
         let visibleIds = sessionState.visibleSegmentIds(contentOffset: contentOffset, boundsWidth: viewportWorldWidth, segmentWidth: segmentWidth)
         for id in visibleIds {
             guard let segment = sessionState.segments[id] else { continue }
-            for stroke in segment.strokes {
-                CanvasRenderer.drawStrokeWorld(toRenderStroke(stroke), in: context)
+            for (index, stroke) in segment.strokes.enumerated() {
+                if let prepared = preparedStroke(for: stroke, segmentId: id, strokeIndex: index) {
+                    CanvasRenderer.drawPreparedStrokeWorld(prepared, in: context)
+                }
             }
         }
         if let stroke = currentStroke {
@@ -1152,7 +1237,9 @@ final class TapeCanvasUIView: UIView {
     private func undoLastStroke() {
         guard sessionState.undoLastStroke() else { return }
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
-        setNeedsDisplay()
+        invalidatePreparedStrokeCache()
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
         showToast(text: NSLocalizedString("toast.undo", comment: "Undo"), type: .warning)
         postToolbarStateChange()
     }
@@ -1161,7 +1248,9 @@ final class TapeCanvasUIView: UIView {
     private func redoLastStroke() {
         guard sessionState.redoLastStroke() else { return }
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
-        setNeedsDisplay()
+        invalidatePreparedStrokeCache()
+        markDrawingContentChanged()
+        requestDisplayIfNeeded()
         showToast(text: NSLocalizedString("toast.redo", comment: "Redo"), type: .success)
         postToolbarStateChange()
     }
@@ -1180,8 +1269,10 @@ final class TapeCanvasUIView: UIView {
                     context.setLineCap(.round)
                     context.setLineJoin(.round)
                     for segment in self.sessionState.segments.values {
-                        for stroke in segment.strokes {
-                            CanvasRenderer.drawStrokeWorld(self.toRenderStroke(stroke), in: context)
+                        for (index, stroke) in segment.strokes.enumerated() {
+                            if let prepared = self.preparedStroke(for: stroke, segmentId: segment.id, strokeIndex: index) {
+                                CanvasRenderer.drawPreparedStrokeWorld(prepared, in: context)
+                            }
                         }
                     }
                     if let stroke = self.currentStroke {
@@ -1262,8 +1353,10 @@ final class TapeCanvasUIView: UIView {
         telemetry = Telemetry()
         didShowSavedToastThisSession = false
         sessionManager.deleteSession()
+        invalidatePreparedStrokeCache()
+        markDrawingContentChanged()
         radialMenu.updateActionAvailability(undoEnabled: !sessionState.undoStack.isEmpty, redoEnabled: !sessionState.redoPayloadStack.isEmpty)
-        setNeedsDisplay()
+        requestDisplayIfNeeded(force: true)
         postToolbarStateChange()
     }
 
@@ -1320,7 +1413,8 @@ final class TapeCanvasUIView: UIView {
                 self.cachedPaperSurface = PaperSurface.current()
                 self.backgroundColor = self.backgroundColorTone.resolvedColor(with: self.traitCollection)
                 self.noiseTile = nil
-                self.setNeedsDisplay()
+                self.markDrawingContentChanged()
+                self.requestDisplayIfNeeded()
             }
         }
         applyLegacyRadialMenuVisibility()
@@ -1363,7 +1457,7 @@ final class TapeCanvasUIView: UIView {
             self.contentOffset.y = rect.midY - visibleH * 0.5
             self.clampContentOffset()
             self.updateSegmentsIfNeeded()
-            self.setNeedsDisplay()
+            self.requestDisplayIfNeeded()
             self.postToolbarStateChange()
             self.showToast(text: NSLocalizedString("toast.view_fit_content", comment: "Fit content"), type: .info)
         }
@@ -1390,7 +1484,7 @@ final class TapeCanvasUIView: UIView {
         contentOffset.y = worldAtCenter.y - center.y / newScale
         clampContentOffset()
         updateSegmentsIfNeeded()
-        setNeedsDisplay()
+        requestDisplayIfNeeded()
         postToolbarStateChange()
     }
 
@@ -1433,7 +1527,6 @@ final class TapeCanvasUIView: UIView {
         let next = (nearest + 1) % presets.count
         baseLineWidth = presets[next]
         UserDefaults.standard.set(Double(baseLineWidth), forKey: SettingsKeys.baseLineWidth)
-        setNeedsDisplay()
         postToolbarStateChange()
     }
 

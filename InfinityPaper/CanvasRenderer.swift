@@ -15,6 +15,17 @@ struct RenderStroke {
     var lineWidth: CGFloat
 }
 
+struct PreparedRenderStrokeSegment {
+    var start: CGPoint
+    var end: CGPoint
+    var width: CGFloat
+}
+
+struct PreparedRenderStroke {
+    var color: UIColor
+    var segments: [PreparedRenderStrokeSegment]
+}
+
 /// Provides rendering utilities for canvas drawing operations.
 final class CanvasRenderer {
     private enum Layout {
@@ -35,15 +46,8 @@ final class CanvasRenderer {
         in context: CGContext,
         contentOffset: CGPoint
     ) {
-        guard stroke.points.count > 1 else { return }
-        context.setStrokeColor(stroke.color.cgColor)
-        drawStrokeSegments(
-            stroke,
-            in: context,
-            transform: { point in
-                CGPoint(x: point.x - contentOffset.x, y: point.y - contentOffset.y)
-            }
-        )
+        guard let prepared = prepareStroke(stroke) else { return }
+        drawPreparedStroke(prepared, in: context, contentOffset: contentOffset)
     }
     
     /// Draws a stroke in world coordinates (no transform).
@@ -54,26 +58,54 @@ final class CanvasRenderer {
         _ stroke: RenderStroke,
         in context: CGContext
     ) {
-        guard stroke.points.count > 1 else { return }
-        context.setStrokeColor(stroke.color.cgColor)
-        drawStrokeSegments(stroke, in: context, transform: { $0 })
+        guard let prepared = prepareStroke(stroke) else { return }
+        drawPreparedStrokeWorld(prepared, in: context)
     }
-    
-    /// Draws stroke segments with smoothing, width scaling, and tail effects.
-    /// - Parameters:
-    ///   - stroke: The stroke to draw
-    ///   - context: The graphics context
-    ///   - transform: Transform function to apply to points (e.g., view or world coordinates)
-    private static func drawStrokeSegments(
-        _ stroke: RenderStroke,
+
+    static func prepareStroke(_ stroke: RenderStroke) -> PreparedRenderStroke? {
+        guard stroke.points.count > 1 else { return nil }
+        let smoothed = smoothedPoints(for: stroke.points, passes: 2)
+        guard smoothed.count > 1 else { return nil }
+        let segments = makeSegments(stroke, smoothedPoints: smoothed)
+        guard !segments.isEmpty else { return nil }
+        return PreparedRenderStroke(color: stroke.color, segments: segments)
+    }
+
+    static func drawPreparedStroke(
+        _ prepared: PreparedRenderStroke,
         in context: CGContext,
-        transform: (CGPoint) -> CGPoint
+        contentOffset: CGPoint
     ) {
+        context.saveGState()
+        context.translateBy(x: -contentOffset.x, y: -contentOffset.y)
+        drawPreparedStrokeWorld(prepared, in: context)
+        context.restoreGState()
+    }
+
+    static func drawPreparedStrokeWorld(
+        _ prepared: PreparedRenderStroke,
+        in context: CGContext
+    ) {
+        guard !prepared.segments.isEmpty else { return }
+        context.setStrokeColor(prepared.color.cgColor)
         context.setLineCap(.round)
         context.setLineJoin(.round)
         context.setMiterLimit(4)
-        let smoothed = smoothedPoints(for: stroke.points, passes: 2).map(transform)
-        guard smoothed.count > 1 else { return }
+        for segment in prepared.segments {
+            context.setLineWidth(segment.width)
+            context.beginPath()
+            context.move(to: segment.start)
+            context.addLine(to: segment.end)
+            context.strokePath()
+        }
+    }
+    
+    /// Builds precomputed stroke segments with smoothing, width scaling, and tail effects.
+    private static func makeSegments(
+        _ stroke: RenderStroke,
+        smoothedPoints smoothed: [CGPoint]
+    ) -> [PreparedRenderStrokeSegment] {
+        guard smoothed.count > 1 else { return [] }
         
         let tailCount = min(20, max(0, smoothed.count - 1))
         let tailStart = max(0, smoothed.count - 1 - tailCount)
@@ -81,6 +113,8 @@ final class CanvasRenderer {
         
         var filteredScale: CGFloat = 1.0
         let smoothingAlpha = Layout.strokeSmoothingAlpha
+        var segments: [PreparedRenderStrokeSegment] = []
+        segments.reserveCapacity(smoothed.count - 1)
         for i in 1..<smoothed.count {
             let start = smoothed[i - 1]
             let end = smoothed[i]
@@ -95,12 +129,15 @@ final class CanvasRenderer {
             } else {
                 tailScale = 1.0
             }
-            context.setLineWidth(max(0.4, width * tailScale))
-            context.beginPath()
-            context.move(to: start)
-            context.addLine(to: end)
-            context.strokePath()
+            segments.append(
+                PreparedRenderStrokeSegment(
+                    start: start,
+                    end: end,
+                    width: max(0.4, width * tailScale)
+                )
+            )
         }
+        return segments
     }
     
     /// Smooths points using a simple averaging filter.

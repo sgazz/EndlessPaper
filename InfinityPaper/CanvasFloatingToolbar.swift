@@ -23,6 +23,7 @@ final class CanvasToolbarStateBroker: ObservableObject {
     @Published var paperMovementLocked: Bool = false
     /// Matches actual stroke (e.g. white in dark mode for first slot), unlike raw palette swatches.
     @Published var strokePreviewUIColor: UIColor = .darkGray
+    private var syncQueued = false
 
     func attach(_ canvas: TapeCanvasUIView) {
         self.canvas = canvas
@@ -32,29 +33,40 @@ final class CanvasToolbarStateBroker: ObservableObject {
     /// Schedules a sync so `@Published` updates never run during SwiftUI view updates
     /// (e.g. `UIViewRepresentable.makeUIView` calling `attach` → would warn otherwise).
     func syncFromCanvas() {
+        guard !syncQueued else { return }
+        syncQueued = true
         DispatchQueue.main.async { [weak self] in
-            self?.applySyncFromCanvas()
+            guard let self else { return }
+            self.syncQueued = false
+            self.applySyncFromCanvas()
         }
     }
 
     private func applySyncFromCanvas() {
         guard let canvas else {
-            undoEnabled = false
-            redoEnabled = false
-            lineWidthLabel = ""
-            selectedColorIndex = 0
-            selectedWidthPresetIndex = 0
-            paperMovementLocked = false
-            strokePreviewUIColor = .darkGray
+            if undoEnabled { undoEnabled = false }
+            if redoEnabled { redoEnabled = false }
+            if !lineWidthLabel.isEmpty { lineWidthLabel = "" }
+            if selectedColorIndex != 0 { selectedColorIndex = 0 }
+            if selectedWidthPresetIndex != 0 { selectedWidthPresetIndex = 0 }
+            if paperMovementLocked { paperMovementLocked = false }
+            if strokePreviewUIColor != .darkGray { strokePreviewUIColor = .darkGray }
             return
         }
-        undoEnabled = canvas.toolbarUndoEnabled
-        redoEnabled = canvas.toolbarRedoEnabled
-        lineWidthLabel = String(format: "%.1f", canvas.toolbarBaseLineWidth)
-        selectedColorIndex = canvas.toolbarSelectedPaletteIndex
-        selectedWidthPresetIndex = canvas.toolbarWidthPresetIndex()
-        paperMovementLocked = canvas.toolbarPaperMovementLocked
-        strokePreviewUIColor = canvas.exposedBaseStrokeColor
+        let nextUndo = canvas.toolbarUndoEnabled
+        if undoEnabled != nextUndo { undoEnabled = nextUndo }
+        let nextRedo = canvas.toolbarRedoEnabled
+        if redoEnabled != nextRedo { redoEnabled = nextRedo }
+        let nextLineWidthLabel = String(format: "%.1f", canvas.toolbarBaseLineWidth)
+        if lineWidthLabel != nextLineWidthLabel { lineWidthLabel = nextLineWidthLabel }
+        let nextColorIndex = canvas.toolbarSelectedPaletteIndex
+        if selectedColorIndex != nextColorIndex { selectedColorIndex = nextColorIndex }
+        let nextWidthIndex = canvas.toolbarWidthPresetIndex()
+        if selectedWidthPresetIndex != nextWidthIndex { selectedWidthPresetIndex = nextWidthIndex }
+        let nextLocked = canvas.toolbarPaperMovementLocked
+        if paperMovementLocked != nextLocked { paperMovementLocked = nextLocked }
+        let nextPreviewColor = canvas.exposedBaseStrokeColor
+        if strokePreviewUIColor != nextPreviewColor { strokePreviewUIColor = nextPreviewColor }
     }
 
     var paletteUIColors: [UIColor] {
